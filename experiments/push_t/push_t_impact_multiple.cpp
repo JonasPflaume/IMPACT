@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
     config.control_rate_weight = 0.0;
     config.final_cost_weight = 100.0;
 
-    config.rho_max = 500.0;
+    config.rho_max = 1000.0;
     config.rho_scale = 1.05;
 
     const double all_scale = 25.0;
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
     config.dynamics_scale = all_scale;
     config.eq_scale = all_scale;
     config.ineq_scale = all_scale;
-    config.comp_scale = 1.0;
+    config.comp_scale = 0.1;
 
     config.max_outer_iters = 1000;
     config.outer_tol_h = 1e-5;
