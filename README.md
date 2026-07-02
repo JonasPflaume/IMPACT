@@ -18,6 +18,23 @@ front-end.
 Dependencies: CMake ≥ 3.15, Eigen3, CasADi, BLAS/LAPACK. The Allegro demo also
 needs MuJoCo and GLFW.
 
+For the planar CITO experiments, the quickest path is the Docker image:
+
+```bash
+docker build -t impact .
+
+# Runs the box-pushing multiple-shooting example with default arguments
+docker run --rm -v "$PWD/results:/workspace/impact/results" impact
+
+# Other CITO examples
+docker run --rm -v "$PWD/results:/workspace/impact/results" impact push_t
+docker run --rm -v "$PWD/results:/workspace/impact/results" impact cart
+```
+
+The Docker build disables the MuJoCo/Allegro target so the planar experiments do
+not require MuJoCo or GLFW. Run `docker run --rm impact help` to see all wrapper
+commands.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
@@ -60,7 +77,8 @@ accept an explicit output path as the final argument.
 
 For the CITO experiments in the paper, use the multiple-shooting binaries:
 `*_impact_multiple`. In this transcription, the state trajectory is free and
-dynamics are enforced as defect constraints. Single shooting is also implemented for comparison purpose.
+dynamics are enforced as defect constraints. Single shooting is also implemented
+for comparison purposes.
 
 ```bash
 # box pushing       state = [px, py, theta]

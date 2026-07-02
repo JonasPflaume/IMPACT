@@ -1,5 +1,7 @@
 add_subdirectory(box)
 add_subdirectory(push_t)
 add_subdirectory(cart_transporter)
-add_subdirectory(allegro)
+if(IMPACT_BUILD_ALLEGRO)
+    add_subdirectory(allegro)
+endif()
 add_subdirectory(toy_mpcc)
