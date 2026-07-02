@@ -5,8 +5,23 @@ IMPACT is an augmented-Lagrangian / block-coordinate-descent solver for
 this repository is mainly organized around contact-implicit trajectory
 optimization, but the solver can also be used on a generic MPCC.
 
-> Li, Gong, Chalvatzaki. **IMPACT: An Implicit Active-Set Augmented Lagrangian for
-> Fast Contact-Implicit Trajectory Optimization.** RSS 2026. (cite below)
+<p align="center">
+  <a href="https://jonaspflaume.github.io/impact_info/">
+    <img src="https://img.shields.io/badge/Project%20Page-IMPACT-2563eb?style=for-the-badge&logo=githubpages&logoColor=white" alt="Project Page">
+  </a>
+  <a href="https://arxiv.org/abs/2605.09127">
+    <img src="https://img.shields.io/badge/arXiv-2605.09127-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white" alt="arXiv">
+  </a>
+  <a href="#citation">
+    <img src="https://img.shields.io/badge/RSS-2026-1f883d?style=for-the-badge" alt="RSS 2026">
+  </a>
+</p>
+
+<p align="center">
+  <b><a href="https://jonaspflaume.github.io/impact_info/">IMPACT: An Implicit Active-Set Augmented Lagrangian for Fast Contact-Implicit Trajectory Optimization</a></b>
+  <br>
+  Jiayun Li, Dejian Gong, Georgia Chalvatzaki. RSS 2026. (<a href="#citation">cite below</a>)
+</p>
 
 The solver code is shared across all examples. A task supplies the symbolic
 problem data, then a shooting builder assembles the MPCC passed to
