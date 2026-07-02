@@ -1,0 +1,5 @@
+add_subdirectory(box)
+add_subdirectory(push_t)
+add_subdirectory(cart_transporter)
+add_subdirectory(allegro)
+add_subdirectory(toy_mpcc)

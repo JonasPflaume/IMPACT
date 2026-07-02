@@ -1,0 +1,44 @@
+# ---- Build ----
+build/
+build-*/
+cmake-build-*/
+# In case CMake is ever run in-source
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.a
+*.so
+*.so.*
+
+# ---- Solver / experiment outputs ----
+# Drivers write trajectories to results/<env>/<solver>/trajectory_*.txt
+results/
+
+# Visualization artifacts produced by experiments/*/*_visual.py
+*_overlay.png
+*_overlay.pdf
+*_sequence.png
+*_sequence.pdf
+*_summary.png
+*_summary.pdf
+*_animation.mp4
+*_animation.gif
+# Trajectory dumps written next to the scripts
+*_trajectory.txt
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
