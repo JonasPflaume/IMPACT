@@ -24,7 +24,12 @@ optimization, but the solver can also be used on a generic MPCC.
 </p>
 
 <p align="center">
-  <img src="resources/image35.gif" width="100%" alt="IMPACT contact-implicit trajectory optimization on the Push-T task">
+  <img src="resources/hero_box.png" height="250" alt="Box-pushing trajectory">
+  &nbsp;&nbsp;
+  <img src="resources/hero_push_t.png" height="250" alt="Push-T trajectory">
+</p>
+<p align="center">
+  <img src="resources/hero_cart.gif" width="80%" alt="Cart-transporter animation">
 </p>
 
 The solver code is shared across all examples. A task supplies the symbolic
