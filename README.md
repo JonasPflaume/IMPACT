@@ -23,6 +23,10 @@ optimization, but the solver can also be used on a generic MPCC.
   Jiayun Li, Dejian Gong, Georgia Chalvatzaki. RSS 2026. (<a href="#citation">cite below</a>)
 </p>
 
+<p align="center">
+  <img src="resources/image35.gif" width="100%" alt="IMPACT contact-implicit trajectory optimization on the Push-T task">
+</p>
+
 The solver code is shared across all examples. A task supplies the symbolic
 problem data, then a shooting builder assembles the MPCC passed to
 `BCDAULASolver`. The CITO experiments in the paper use the multiple-shooting
