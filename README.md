@@ -50,6 +50,10 @@ The Docker build disables the MuJoCo/Allegro target so the planar experiments do
 not require MuJoCo or GLFW. Run `docker run --rm impact help` to see all wrapper
 commands.
 
+The container runs as root, so files written to the mounted `results/` directory
+are root-owned on Linux hosts; add `--user "$(id -u):$(id -g)"` to the
+`docker run` command if you want them owned by your user.
+
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
