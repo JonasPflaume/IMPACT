@@ -54,6 +54,10 @@ SingleShootingLayout buildSingleShooting(const StageProblem& stage, const BCDAUL
     desc.p = SX::vertcat({p_rt, x_0});  // p_rt (targets/phi/J) then the rollout start x_0
     desc.cost = stage.costResidual(Xlist, Ulist, p_rt);
     desc.cost_is_linear = false;  // rolled-out state makes the cost nonlinear
+    desc.check_stationarity = config.check_stationarity;
+    desc.conditioned_complementarity = config.conditioned_complementarity;
+    desc.stationarity_tol = config.stationarity_tol;
+    desc.max_stagnation_restarts = config.max_stagnation_restarts;
 
     if (ndynres_s > 0)
         desc.addEqualityBlock("dynamics", SX::vertcat(dynres_list),

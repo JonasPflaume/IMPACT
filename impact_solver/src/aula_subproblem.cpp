@@ -67,4 +67,12 @@ double AulaSubproblem::evalTaskObjective(const Eigen::VectorXd& z) const {
     return obj_ ? obj_(z) : 0.0;
 }
 
+Eigen::VectorXd AulaSubproblem::evalTaskGradient(const Eigen::VectorXd& z) const {
+    return obj_grad_ ? obj_grad_(z) : Eigen::VectorXd::Zero(n_opt_);
+}
+
+double AulaSubproblem::evalAugmentedGradientInf(const Eigen::VectorXd& z) const {
+    return stationarity_eval_ ? stationarity_eval_(z) : 0.0;
+}
+
 }  // namespace impact

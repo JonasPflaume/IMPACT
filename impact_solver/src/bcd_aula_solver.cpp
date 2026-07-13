@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 
 #include "impact/complementarity_projection.h"
 
@@ -37,6 +38,15 @@ int totalCompDim(const std::vector<CompBlock>& comps) {
 BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& config,
                                    const Eigen::VectorXd& z_init) {
     const auto t_start = std::chrono::high_resolution_clock::now();
+
+    if (z_init.size() != sub.numOpt() || !z_init.allFinite())
+        throw std::invalid_argument("BCDAULASolver::solve: invalid initial decision vector");
+    if (config.max_outer_iters <= 0 || config.max_inner_iters <= 0 ||
+        config.newton_max_iter <= 0)
+        throw std::invalid_argument("BCDAULASolver::solve: iteration limits must be positive");
+    if (!(config.rho_scale > 1.0) || !(config.rho_max > 0.0) ||
+        !(config.penalty_decrease_ratio >= 0.0 && config.penalty_decrease_ratio <= 1.0))
+        throw std::invalid_argument("BCDAULASolver::solve: invalid penalty configuration");
 
     // Bind the Gauss-Newton X-solver to this subproblem.
     GaussNewtonConfig gn_cfg;
@@ -82,10 +92,15 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
 
     bool converged = false;
     bool any_la_failure = false;  // a stuck X-update occurred at some inner iteration
+    const bool check_stationarity = sub.checkStationarity();
+    const bool conditioned_comp = sub.conditionedComplementarity();
+    int stagnant_outer = 0;
+    int stagnation_restarts = 0;
     int outer_iter = 0;
     int total_inner = 0;
 
     for (outer_iter = 0; outer_iter < config.max_outer_iters; ++outer_iter) {
+        const Eigen::VectorXd z_outer_start = z;
         // Clip multipliers before the inner solve.
         for (DualBlock& b : blocks) {
             if (b.dim == 0) continue;
@@ -165,8 +180,9 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         }
 
         // Complementarity dual ascent on the split G/H residuals.
-        double comp_prod = 0.0, v_comp_scaled = 0.0;
+        double comp_prod = 0.0, comp_termination = 0.0, v_comp_scaled = 0.0;
         std::vector<double> comp_prod_blocks(comps.size(), 0.0);
+        std::vector<double> comp_termination_blocks(comps.size(), 0.0);
         std::vector<double> v_comp_scaled_blocks(comps.size(), 0.0);
         if (n_comp > 0) {
             if (comps.size() == 1) {
@@ -178,6 +194,9 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
                 comp_prod = (G.cwiseProduct(H)).lpNorm<Eigen::Infinity>();
                 v_comp_scaled = std::max(infNorm(comp_res_G), infNorm(comp_res_H));
                 comp_prod_blocks[0] = comp_prod;
+                comp_termination_blocks[0] =
+                    conditioned_comp ? comp.scale * comp.scale * comp_prod : comp_prod;
+                comp_termination = comp_termination_blocks[0];
                 v_comp_scaled_blocks[0] = v_comp_scaled;
             } else {
                 int off = 0;
@@ -192,6 +211,11 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
                     comp.kappaH += comp.rho * comp_res_H;
                     comp_prod_blocks[ci] = (Gb.cwiseProduct(Hb)).lpNorm<Eigen::Infinity>();
                     comp_prod = std::max(comp_prod, comp_prod_blocks[ci]);
+                    comp_termination_blocks[ci] =
+                        conditioned_comp ? comp.scale * comp.scale * comp_prod_blocks[ci]
+                                         : comp_prod_blocks[ci];
+                    comp_termination =
+                        std::max(comp_termination, comp_termination_blocks[ci]);
                     v_comp_scaled_blocks[ci] = std::max(infNorm(comp_res_G), infNorm(comp_res_H));
                     v_comp_scaled = std::max(v_comp_scaled, v_comp_scaled_blocks[ci]);
                     off += comp.dim;
@@ -212,15 +236,17 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         for (size_t ci = 0; ci < comps.size(); ++ci) {
             CompBlock& comp = comps[ci];
             if (comp.dim <= 0) continue;
-            const double vcu = comp.scale > 0.0 ? v_comp_scaled_blocks[ci] / comp.scale
-                                                : v_comp_scaled_blocks[ci];
+            const double vcu = conditioned_comp
+                                   ? v_comp_scaled_blocks[ci]
+                                   : (comp.scale > 0.0
+                                          ? v_comp_scaled_blocks[ci] / comp.scale
+                                          : v_comp_scaled_blocks[ci]);
             comp.rho =
                 safeguardedPenalty(comp.rho, vcu, v_comp_prev[ci], comp.tol, eta, gamma,
                                    config.rho_max);
             v_comp_prev[ci] = vcu;
         }
 
-        // Convergence check in the original, unscaled constraint units.
         auto unscale = [](double v, double scale) { return scale > 0.0 ? v / scale : v; };
         bool feasible = true;
         double max_unscaled = 0.0;
@@ -234,12 +260,23 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         for (size_t ci = 0; ci < comps.size(); ++ci) {
             const CompBlock& comp = comps[ci];
             if (comp.dim <= 0) continue;
-            const double block_res_u = unscale(v_comp_scaled_blocks[ci], comp.scale);
-            comp_res_u = std::max(comp_res_u, block_res_u);
-            if (comp_prod_blocks[ci] >= comp.tol || block_res_u >= comp.tol) feasible = false;
+            const double block_res_test =
+                conditioned_comp ? v_comp_scaled_blocks[ci]
+                                 : unscale(v_comp_scaled_blocks[ci], comp.scale);
+            comp_res_u = std::max(comp_res_u, block_res_test);
+            if (comp_termination_blocks[ci] >= comp.tol || block_res_test >= comp.tol)
+                feasible = false;
         }
 
-        outer_viol_prev = std::max({max_unscaled, comp_prod, comp_res_u});
+        outer_viol_prev = std::max({max_unscaled, comp_termination, comp_res_u});
+
+        double stationarity = check_stationarity ? INF : 0.0;
+        if (check_stationarity && feasible) {
+            sub.syncParams();
+            stationarity = sub.evalAugmentedGradientInf(z);
+        }
+        const bool stationary = !check_stationarity ||
+                                (feasible && stationarity < sub.stationarityTol());
 
         if (config.print_level >= 1) {
             std::cout << std::scientific << std::setprecision(3) << "Outer " << std::setw(4)
@@ -261,12 +298,74 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
                               << ",rho=" << comp.rho << ")";
                 }
             }
+            if (check_stationarity) std::cout << " stationarity=" << stationarity;
             std::cout << std::endl;
         }
 
-        if (feasible) {
+        if (feasible && stationary) {
             converged = true;
             break;
+        }
+
+        if (stagnation_restarts < sub.maxStagnationRestarts()) {
+            const double step_inf = (z - z_outer_start).lpNorm<Eigen::Infinity>();
+            const double step_floor = 1e-10 * (1.0 + z.lpNorm<Eigen::Infinity>());
+            stagnant_outer = (step_inf <= step_floor) ? stagnant_outer + 1 : 0;
+            bool severely_infeasible = false;
+            for (size_t i = 0; i < blocks.size(); ++i) {
+                if (blocks[i].dim == 0) continue;
+                const double vu = unscale(v_scaled[i], blocks[i].scale);
+                severely_infeasible |= vu > 10.0 * blocks[i].tol;
+            }
+            for (size_t ci = 0; ci < comps.size(); ++ci) {
+                if (comps[ci].dim == 0) continue;
+                severely_infeasible |=
+                    comp_termination_blocks[ci] > 10.0 * comps[ci].tol ||
+                    v_comp_scaled_blocks[ci] > 10.0 * comps[ci].tol;
+            }
+            const bool severely_nonstationary = check_stationarity && feasible &&
+                                                stationarity > 10.0 * sub.stationarityTol();
+            if (stagnant_outer >= 3 &&
+                (severely_infeasible || severely_nonstationary)) {
+                Eigen::VectorXd direction = -sub.evalTaskGradient(z);
+                const double d_inf = direction.size()
+                                         ? direction.lpNorm<Eigen::Infinity>()
+                                         : 0.0;
+                if (!direction.allFinite() || d_inf <= 1e-12) {
+                    direction.resize(z.size());
+                    for (int i = 0; i < z.size(); ++i)
+                        direction(i) = ((i + stagnation_restarts) % 2 == 0) ? 1.0 : -1.0;
+                } else {
+                    direction /= d_inf;
+                }
+                for (int i = 0; i < z.size(); ++i)
+                    z(i) += 1e-2 * std::max(1.0, std::abs(z(i))) * direction(i);
+
+                for (DualBlock& b : blocks) {
+                    b.kappa.setZero();
+                    b.rho = b.rho_init;
+                }
+                if (n_comp > 0) {
+                    sub.evalGH(z, G, H);
+                    int comp_off = 0;
+                    for (CompBlock& comp : comps) {
+                        comp.kappaG.setZero();
+                        comp.kappaH.setZero();
+                        comp.rho = comp.rho_init;
+                        const Eigen::VectorXd Gb = G.segment(comp_off, comp.dim);
+                        const Eigen::VectorXd Hb = H.segment(comp_off, comp.dim);
+                        projectComplementarity(Gb, Hb, comp.kappaG, comp.kappaH,
+                                               comp.rho, comp.scale, comp.sG, comp.sH);
+                        comp_off += comp.dim;
+                    }
+                }
+                std::fill(v_prev.begin(), v_prev.end(), INF);
+                std::fill(v_comp_prev.begin(), v_comp_prev.end(), INF);
+                outer_viol_prev = 1e3;
+                stagnant_outer = 0;
+                ++stagnation_restarts;
+                sub.syncParams();
+            }
         }
     }
 
@@ -277,6 +376,8 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     res.outer_iterations = std::min(outer_iter + 1, config.max_outer_iters);
     res.total_inner_iterations = total_inner;
     res.objective_value = sub.evalTaskObjective(z);
+    if (check_stationarity) res.constraint_violations.reserve(blocks.size() + comps.size());
+    if (check_stationarity) res.stationarity_violation = sub.evalAugmentedGradientInf(z);
 
     if (n_comp > 0) {
         sub.evalGH(z, G, H);
@@ -293,6 +394,19 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         if (b.name == "dynamics") res.dynamics_violation = vu;
         else if (b.name == "equality") res.equality_violation = vu;
         else if (b.name == "inequality") res.inequality_violation = vu;
+        if (check_stationarity) res.constraint_violations.push_back({b.name, vu, vu});
+    }
+    if (check_stationarity && n_comp > 0) {
+        int comp_off = 0;
+        for (const CompBlock& comp : comps) {
+            const Eigen::VectorXd Gb = G.segment(comp_off, comp.dim);
+            const Eigen::VectorXd Hb = H.segment(comp_off, comp.dim);
+            const double product = (Gb.cwiseProduct(Hb)).lpNorm<Eigen::Infinity>();
+            const double split = std::max(
+                infNorm(Gb - comp.sG), infNorm(Hb - comp.sH));
+            res.constraint_violations.push_back({comp.name, product, split});
+            comp_off += comp.dim;
+        }
     }
 
     res.solve_time =
@@ -305,7 +419,9 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         res.status_message = "Linear-algebra failure: X-update factorisation stuck";
     } else {
         res.status = BCDAULAStatus::MaxIterations;
-        res.status_message = "Max outer iterations reached";
+        res.status_message = check_stationarity && std::isfinite(res.stationarity_violation)
+                                 ? "Max outer iterations reached (feasibility or stationarity)"
+                                 : "Max outer iterations reached";
     }
 
     if (config.print_level >= 1) {

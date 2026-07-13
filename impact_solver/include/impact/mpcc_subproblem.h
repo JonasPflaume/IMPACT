@@ -62,6 +62,11 @@ struct MPCCDescription {
     bool cost_is_linear = false;  // fold cost into the constant saddle block if true
     std::vector<MPCCConstraint> constraints;
 
+    bool check_stationarity = true;
+    bool conditioned_complementarity = true;
+    double stationarity_tol = 1e-5;
+    int max_stagnation_restarts = 2;
+
     // Compile the residual/Jacobian CasADi functions through a C compiler instead
     // of the interpreter. This costs extra at build time, but helps when the same
     // problem is solved many times, as in receding-horizon MPC.

@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 #include <cmath>
+#include <stdexcept>
 #include <string>
 
 namespace impact {
@@ -24,6 +25,35 @@ std::function<Eigen::VectorXd(const Eigen::VectorXd&)> evalClosureP(casadi::Func
 
 MPCCSubproblem buildMPCC(const MPCCDescription& desc) {
     const SX& z = desc.z;
+    if (z.is_empty() || z.size2() != 1)
+        throw std::invalid_argument("buildMPCC: z must be a non-empty column vector");
+    if (!desc.cost.is_empty() && desc.cost.size2() != 1)
+        throw std::invalid_argument("buildMPCC: cost must be a column residual vector");
+    if (desc.check_stationarity &&
+        (!(desc.stationarity_tol > 0.0) || !std::isfinite(desc.stationarity_tol)))
+        throw std::invalid_argument("buildMPCC: stationarity_tol must be finite and positive");
+    if (desc.max_stagnation_restarts < 0)
+        throw std::invalid_argument("buildMPCC: max_stagnation_restarts must be nonnegative");
+    for (const MPCCConstraint& cc : desc.constraints) {
+        if (!(cc.scale > 0.0) || !std::isfinite(cc.scale))
+            throw std::invalid_argument("buildMPCC: block '" + cc.name +
+                                        "' scale must be finite and positive");
+        if (!(cc.rho_init > 0.0) || !std::isfinite(cc.rho_init))
+            throw std::invalid_argument("buildMPCC: block '" + cc.name +
+                                        "' rho_init must be finite and positive");
+        if (!(cc.tol > 0.0) || !std::isfinite(cc.tol))
+            throw std::invalid_argument("buildMPCC: block '" + cc.name +
+                                        "' tol must be finite and positive");
+        if (cc.kind == MPCCConstraint::Complementarity) {
+            if (cc.G.is_empty() || cc.G.size2() != 1 || cc.H.size2() != 1 ||
+                cc.G.size1() != cc.H.size1())
+                throw std::invalid_argument("buildMPCC: complementarity block '" + cc.name +
+                                            "' needs equally-sized non-empty column legs");
+        } else if (cc.c.is_empty() || cc.c.size2() != 1) {
+            throw std::invalid_argument("buildMPCC: constraint block '" + cc.name +
+                                        "' must be a non-empty column vector");
+        }
+    }
     const int n_opt = static_cast<int>(z.size1());
     const int np = desc.p.is_empty() ? 0 : static_cast<int>(desc.p.size1());
     const SX& cost = desc.cost;
@@ -149,9 +179,21 @@ MPCCSubproblem buildMPCC(const MPCCDescription& desc) {
                                fopts)
             : casadi::Function("GH", {z, p_full}, {SX::zeros(0, 1), SX::zeros(0, 1)}, fopts);
     casadi::Function obj_func("obj", {z, p_full}, {SX::sumsqr(cost)}, fopts);
+    casadi::Function obj_grad_func;
+    casadi::Function stationarity_func;
+    if (desc.max_stagnation_restarts > 0) {
+        obj_grad_func = casadi::Function(
+            "obj_grad", {z, p_full}, {SX::gradient(SX::sumsqr(cost), z)}, fopts);
+    }
+    if (desc.check_stationarity) {
+        stationarity_func = casadi::Function(
+            "aug_stationarity", {z, p_full}, {SX::gradient(SX::sumsqr(r), z)}, fopts);
+    }
 
     auto sub = std::make_unique<AulaSubproblem>();
     sub->setFunctions(residual_func, jacobian_func, gh_func, n_opt, n_params);
+    sub->setTerminationOptions(desc.check_stationarity, desc.conditioned_complementarity,
+                               desc.stationarity_tol, desc.max_stagnation_restarts);
     sub->setParamValue(off_rho_one, Eigen::VectorXd::Constant(1, 1.0));
     AulaSubproblem* sp = sub.get();
 
@@ -217,6 +259,25 @@ MPCCSubproblem buildMPCC(const MPCCDescription& desc) {
         casadi::DM zdm(std::vector<double>(zv.data(), zv.data() + zv.size()));
         return static_cast<double>(obj_func(std::vector<casadi::DM>{zdm, sp->params()})[0]);
     });
+    if (desc.max_stagnation_restarts > 0) {
+        sub->setObjectiveGradient(
+            [obj_grad_func, sp](const Eigen::VectorXd& zv) -> Eigen::VectorXd {
+                casadi::DM zdm(std::vector<double>(zv.data(), zv.data() + zv.size()));
+                casadi::DM out =
+                    obj_grad_func(std::vector<casadi::DM>{zdm, sp->params()})[0];
+                return Eigen::Map<const Eigen::VectorXd>(out.ptr(), out.numel());
+            });
+    }
+    if (desc.check_stationarity) {
+        sub->setStationarityEvaluator(
+            [stationarity_func, sp](const Eigen::VectorXd& zv) -> double {
+                casadi::DM zdm(std::vector<double>(zv.data(), zv.data() + zv.size()));
+                casadi::DM out =
+                    stationarity_func(std::vector<casadi::DM>{zdm, sp->params()})[0];
+                const Eigen::Map<const Eigen::VectorXd> g(out.ptr(), out.numel());
+                return g.size() ? g.lpNorm<Eigen::Infinity>() : 0.0;
+            });
+    }
 
     MPCCSubproblem out;
     out.sub = std::move(sub);

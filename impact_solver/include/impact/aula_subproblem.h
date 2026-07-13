@@ -32,6 +32,19 @@ class AulaSubproblem {
                       int n_opt, int n_params);
     void setSaddleLayout(SaddleLayout layout) { layout_ = std::move(layout); }
     void setObjective(std::function<double(const Eigen::VectorXd&)> obj) { obj_ = std::move(obj); }
+    void setObjectiveGradient(std::function<Eigen::VectorXd(const Eigen::VectorXd&)> grad) {
+        obj_grad_ = std::move(grad);
+    }
+    void setStationarityEvaluator(std::function<double(const Eigen::VectorXd&)> eval) {
+        stationarity_eval_ = std::move(eval);
+    }
+    void setTerminationOptions(bool check_stationarity, bool conditioned_complementarity,
+                               double stationarity_tol, int max_stagnation_restarts) {
+        check_stationarity_ = check_stationarity;
+        conditioned_complementarity_ = conditioned_complementarity;
+        stationarity_tol_ = stationarity_tol;
+        max_stagnation_restarts_ = max_stagnation_restarts;
+    }
     // Write a fixed (non-AuLa) parameter sub-vector once, e.g. targets / runtime data.
     void setParamValue(int offset, const Eigen::VectorXd& v);
     std::vector<DualBlock>& dualBlocks() { return dual_blocks_; }
@@ -63,6 +76,12 @@ class AulaSubproblem {
 
     // Task objective for reporting (builder-supplied closure).
     double evalTaskObjective(const Eigen::VectorXd& z) const;
+    Eigen::VectorXd evalTaskGradient(const Eigen::VectorXd& z) const;
+    double evalAugmentedGradientInf(const Eigen::VectorXd& z) const;
+    bool checkStationarity() const { return check_stationarity_; }
+    bool conditionedComplementarity() const { return conditioned_complementarity_; }
+    double stationarityTol() const { return stationarity_tol_; }
+    int maxStagnationRestarts() const { return max_stagnation_restarts_; }
 
    private:
     casadi::Function residual_func_;
@@ -78,6 +97,12 @@ class AulaSubproblem {
     std::vector<CompBlock> comp_blocks_;
     CompBlock empty_comp_;
     std::function<double(const Eigen::VectorXd&)> obj_;
+    std::function<Eigen::VectorXd(const Eigen::VectorXd&)> obj_grad_;
+    std::function<double(const Eigen::VectorXd&)> stationarity_eval_;
+    bool check_stationarity_ = false;
+    bool conditioned_complementarity_ = false;
+    double stationarity_tol_ = 1e-5;
+    int max_stagnation_restarts_ = 0;
 
     void writeBlock(int offset, const Eigen::VectorXd& v);
     const casadi::DM& loadZ(const Eigen::VectorXd& z) const;

@@ -54,6 +54,11 @@ struct BCDAULAConfig {
     double inner_tol_init = 1e-2;   // Stagnation tolerance, early outer iters
     double inner_tol_final = 1e-3;  // Stagnation tolerance, later outer iters
 
+    bool check_stationarity = false;
+    bool conditioned_complementarity = false;
+    double stationarity_tol = 1e-5;
+    int max_stagnation_restarts = 0;
+
     // Solve the GN X-step loosely while feasibility is far off, then tighten as
     // the outer loop improves.
     bool use_forcing_sequence = true;

@@ -64,6 +64,10 @@ MultipleShootingLayout buildMultipleShooting(const StageProblem& stage,
     desc.p = SX::vertcat({p_rt, x_0});  // x_goal then the initial condition x_0
     desc.cost = stage.costResidual(Xlist, Ulist, p_rt);
     desc.cost_is_linear = stage.costIsLinear();
+    desc.check_stationarity = config.check_stationarity;
+    desc.conditioned_complementarity = config.conditioned_complementarity;
+    desc.stationarity_tol = config.stationarity_tol;
+    desc.max_stagnation_restarts = config.max_stagnation_restarts;
 
     if (nc > 0)
         desc.addComplementarityBlock(

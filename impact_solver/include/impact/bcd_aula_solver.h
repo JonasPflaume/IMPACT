@@ -2,6 +2,7 @@
 
 #include <Eigen/Core>
 #include <string>
+#include <vector>
 
 #include "impact/aula_subproblem.h"
 #include "impact/bcd_aula_config.h"
@@ -18,6 +19,12 @@ namespace impact {
  */
 enum class BCDAULAStatus { Converged, MaxIterations, LinearAlgebraFailure };
 
+struct ConstraintViolation {
+    std::string name;
+    double violation = 0.0;  // unscaled infinity norm; raw |G*H| for complementarity
+    double residual_violation = 0.0;  // split residual for complementarity, else same value
+};
+
 /**
  * @brief Result returned by BCDAULASolver.
  *
@@ -32,6 +39,8 @@ struct BCDAULAResult {
     double equality_violation = 0.0;
     double inequality_violation = 0.0;
     double complementarity_violation = 0.0;  // ||G ∘ H||_inf
+    double stationarity_violation = 0.0;      // ||grad_z L_A||_inf; 0 when not evaluated
+    std::vector<ConstraintViolation> constraint_violations;
 
     bool converged = false;  // == (status == BCDAULAStatus::Converged)
     BCDAULAStatus status = BCDAULAStatus::MaxIterations;
