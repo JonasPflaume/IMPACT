@@ -12,7 +12,16 @@ The drawing shows:
 - Relative sliding between cargo and cart
 """
 
+import argparse
 import os as _os
+import sys
+from pathlib import Path
+
+_EXPERIMENTS_DIR = Path(__file__).resolve().parents[1]
+if str(_EXPERIMENTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXPERIMENTS_DIR))
+from visual_utils import resolve_output_dir, resolve_trajectory
+
 import numpy as np
 import matplotlib as _mpl
 if not _os.environ.get("DISPLAY"):
@@ -25,7 +34,8 @@ from matplotlib.patches import FancyBboxPatch, Rectangle, FancyArrowPatch
 import matplotlib.patheffects as path_effects
 
 
-def visualize_solution_from_file(trajectory_file, l=1.0, x_goal=None, dt=0.02, minimal_overlay=False, frame_interval=10):
+def visualize_solution_from_file(trajectory_file, l=1.0, x_goal=None, dt=0.02,
+                                 minimal_overlay=False, frame_interval=10, output_dir=None):
     """
     Visualize a cart-transporter trajectory from a solver output file.
     
@@ -36,6 +46,7 @@ def visualize_solution_from_file(trajectory_file, l=1.0, x_goal=None, dt=0.02, m
         dt: Time step for animation speed
         minimal_overlay: If True, hide axes, legend, and title in animation
         frame_interval: Frame interval for overlay sequence (every N frames)
+        output_dir: Directory for generated images and animation
     """
     
     # Cart and cargo dimensions for visualization
@@ -459,7 +470,9 @@ def visualize_solution_from_file(trajectory_file, l=1.0, x_goal=None, dt=0.02, m
     # Create filename with start and end positions
     x1_start, x2_start = float(x[0, 0]), float(x[0, 1])
     x1_end, x2_end = float(x[-1, 0]), float(x[-1, 1])
-    filename_prefix = f"cart_s{x1_start:.2f}_{x2_start:.2f}_e{x1_end:.2f}_{x2_end:.2f}"
+    output_dir = Path(output_dir or Path(trajectory_file).parent)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename_prefix = output_dir / f"cart_s{x1_start:.2f}_{x2_start:.2f}_e{x1_end:.2f}_{x2_end:.2f}"
     
     # Save trajectory sequence (vertical stack of frames)
     print("Creating trajectory sequence image...")
@@ -630,31 +643,21 @@ def visualize_solution_from_file(trajectory_file, l=1.0, x_goal=None, dt=0.02, m
 
 
 if __name__ == "__main__":
-    import sys
-    
-    # Defaults.
-    trajectory_file = "cart_transporter_trajectory.txt"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("trajectory", nargs="?", help="trajectory file (default: newest result)")
+    parser.add_argument("--out-dir", help="output directory (default: results/cart_transporter)")
+    parser.add_argument("--minimal", action="store_true", help="hide axes, legend, and title")
+    parser.add_argument("--interval", type=int, default=10, help="frame interval for the sequence")
+    args = parser.parse_args()
+
+    trajectory_file = resolve_trajectory("cart_transporter", args.trajectory)
+    output_dir = resolve_output_dir("cart_transporter", args.out_dir)
     
     # Goal state: [x1, x2, x1_dot, x2_dot]
     x_goal = [-1.0, -1.5, 0.0, 0.0]
     
-    # Check for --minimal flag and --interval flag
-    minimal_mode = "--minimal" in sys.argv
-    frame_interval = 10
-    
-    args = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
-    
-    # Parse --interval=N
-    for arg in sys.argv:
-        if arg.startswith('--interval='):
-            try:
-                frame_interval = int(arg.split('=')[1])
-            except ValueError:
-                pass
-    
-    # Optional trajectory path.
-    if len(args) > 0:
-        trajectory_file = args[0]
+    minimal_mode = args.minimal
+    frame_interval = args.interval
 
     # Use the goal recorded by the solver in the trajectory file, if present.
     try:
@@ -678,5 +681,6 @@ if __name__ == "__main__":
         x_goal=x_goal,
         dt=0.02,  # Time step
         minimal_overlay=minimal_mode,
-        frame_interval=frame_interval
+        frame_interval=frame_interval,
+        output_dir=output_dir
     )

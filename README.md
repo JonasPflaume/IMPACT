@@ -119,12 +119,26 @@ for comparison purposes.
 # disk pushing      state = [qx, qy, sx, sy], control = [fn, ft, vx, vy]
 #                   args: D angle_deg [horizon] [out] (pusher start doubles as the disk goal)
 ./build/experiments/push_circle/push_circle_impact_multiple            1.5 225 120
+# disk pushing, single-shooting comparison (same arguments/output format)
+./build/experiments/push_circle/push_circle_impact_single              1.5 225 120
 ```
 
 The `*_penalty` (IPOPT) and `*_relaxation` (Scholtes) binaries are baselines and
 take the same arguments. The Python visualizers live next to each task:
 `experiments/<task>/<task>_visual.py` (the disk-pushing one also renders a GIF:
 `python3 experiments/push_circle/push_circle_visual.py results/push_circle/bcd_aula/trajectory_*.txt --out results/push_circle/push_circle.gif`).
+
+Each visualizer can also be run without paths. It finds the newest
+`trajectory_*.txt` recursively under that task's repository-local results
+directory and writes its figures/animation to `results/<task>/`, regardless of
+the current working directory:
+
+```bash
+python3 /path/to/IMPACT/experiments/box/box_visual.py
+python3 /path/to/IMPACT/experiments/push_t/push_t_visual.py
+python3 /path/to/IMPACT/experiments/cart_transporter/cart_transporter_visual.py
+python3 /path/to/IMPACT/experiments/push_circle/push_circle_visual.py
+```
 
 Disk pushing is a quasi-static pusher–slider with contact friction whose smooth
 signed-distance field enters the complementarity. It doubles as a
@@ -145,46 +159,12 @@ flashlight, foambrick, light_bulb, mug, piggy_bank, rubber_duck, stick, teapot,
 torus, water_bottle}. Other flags: `--seed <n>`, `--save-video <path>` (with
 `--render`), `--horizon <h>`, `--max-inner-iters <n>`, `--no-saddle`.
 
-## Tuning notes: cost weights, scaling, and horizon
+## Numerical scaling
 
-The cost weights are not just a modeling choice — they also set the solver's
-convergence speed. The augmented-Lagrangian X-update balances the objective's
-curvature (proportional to the cost weights) against the penalty strength
-`rho * scale^2` of each constraint block. The shipped experiment configs tune
-these jointly: box, push-T and disk pushing pair `final_cost_weight = 100` with
-constraint scales of 10–25, so `rho * scale^2` starts near the cost curvature;
-the cart transporter instead pairs `final_cost_weight = 5000` and unit scales
-with a fast penalty ramp (`rho_scale = 1.5`).
-Moving the weights far away from that balance makes the penalties start orders
-of magnitude too weak: the outer loop then spends many iterations ramping `rho`
-(factor `rho_scale` per iteration) while the inner stagnation and Gauss-Newton
-tolerances — which are absolute — become effectively far tighter than intended.
-The slowdown is multiplicative. Measured on the disk-pushing task (horizon 100):
-raising `stage_cost_weight` from `1e-2` to `1` with everything else fixed slows
-the solve from ~0.03 s to ~22 s while converging to the same trajectory.
-
-Practical rules:
-
-- **Rescaling the whole objective** (all cost weights times `beta`) does not
-  change the solution, but to keep the solver's balance also multiply every
-  `rho_*_init` by `beta` (equivalently, each constraint `*_scale` by
-  `sqrt(beta)`). Measured on disk pushing: this brings the large-weight solve
-  from ~22 s back to under 0.1 s with the same objective value. (Exact
-  iteration-for-iteration equivalence would additionally require scaling the
-  absolute inner tolerances `inner_tol_*` and `newton_tol` by `beta`.)
-- **Raising the control weight alone** changes the effort/accuracy tradeoff,
-  and the quantities involved carry units: what matters is the dimensionless
-  ratio between the total stage cost `w_stage * sum_t ||u_t||^2` and the
-  terminal cost. Since the control needed for a fixed task shrinks with the
-  horizon (per-step effort scales like `1/(H*dt)`), the same `stage_cost_weight`
-  means a different tradeoff — and a different solver balance — at a different
-  horizon. Re-tune weights (or co-scale `rho_*_init`) when changing `horizon`.
-- **Trivial-solution boundary.** For goal-reaching tasks whose target enters
-  only through the terminal cost, once the weighted control effort of doing the
-  task exceeds the terminal cost of standing still, the do-nothing trajectory
-  *is* the optimum (disk pushing: break-even near `stage_cost_weight ~ 4` at the
-  default distance/horizon). Fast convergence to a motionless trajectory in that
-  regime is the correct answer, not a solver failure.
+State and control variables can have different physical units and numerical
+scales, which may affect convergence speed and require problem-specific tuning.
+We are working on making the solver less sensitive to these parameters. If you
+have experience with this issue, please feel free to contact me directly.
 
 ## Solve an MPCC
 

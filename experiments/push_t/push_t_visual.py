@@ -5,7 +5,16 @@ Push-T trajectory visualizer.
 Reads a saved trajectory file and writes both an animation and a static overlay.
 """
 
+import argparse
 import os as _os
+import sys
+from pathlib import Path
+
+_EXPERIMENTS_DIR = Path(__file__).resolve().parents[1]
+if str(_EXPERIMENTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXPERIMENTS_DIR))
+from visual_utils import resolve_output_dir, resolve_trajectory
+
 import numpy as np
 import matplotlib as _mpl
 if not _os.environ.get("DISPLAY"):
@@ -46,7 +55,8 @@ def get_t_shape_vertices(l=0.05, dc=2.6429):
     return t_vertices
 
 
-def visualize_solution_from_file(trajectory_file, l=0.05, dc=2.6429, x_goal=None, dt=0.05, minimal_overlay=False):
+def visualize_solution_from_file(trajectory_file, l=0.05, dc=2.6429, x_goal=None, dt=0.05,
+                                 minimal_overlay=False, output_dir=None):
     """
     Visualize a Push-T trajectory from a solver output file.
     
@@ -57,6 +67,7 @@ def visualize_solution_from_file(trajectory_file, l=0.05, dc=2.6429, x_goal=None
         x_goal: Goal position [x, y, theta] (optional)
         dt: Time step for animation speed
         minimal_overlay: If True, overlay image will hide axes, legend, and title
+        output_dir: Directory for generated images and animation
     """
     
     # Read trajectory file
@@ -490,7 +501,9 @@ def visualize_solution_from_file(trajectory_file, l=0.05, dc=2.6429, x_goal=None
     # Include start/end poses in the filename.
     x_start, y_start, th_start = float(x[0,0]), float(x[0,1]), float(x[0,2])
     x_end, y_end, th_end = float(x[-1,0]), float(x[-1,1]), float(x[-1,2])
-    filename_prefix = f"push_t_s{x_start:.2f}_{y_start:.2f}_{th_start:.2f}_e{x_end:.2f}_{y_end:.2f}_{th_end:.2f}"
+    output_dir = Path(output_dir or Path(trajectory_file).parent)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename_prefix = output_dir / f"push_t_s{x_start:.2f}_{y_start:.2f}_{th_start:.2f}_e{x_end:.2f}_{y_end:.2f}_{th_end:.2f}"
     
     fig_static.savefig(f'{filename_prefix}_overlay.png', dpi=200, bbox_inches='tight', facecolor='white')
     fig_static.savefig(f'{filename_prefix}_overlay.pdf', bbox_inches='tight', facecolor='white')
@@ -517,19 +530,19 @@ def visualize_solution_from_file(trajectory_file, l=0.05, dc=2.6429, x_goal=None
 
 
 if __name__ == "__main__":
-    import sys
-    
-    # Defaults matching the Push-T model.
-    trajectory_file = "push_t_trajectory.txt"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("trajectory", nargs="?", help="trajectory file (default: newest result)")
+    parser.add_argument("--out-dir", help="output directory (default: results/push_t)")
+    parser.add_argument("--minimal", action="store_true", help="hide axes, legend, and title")
+    args = parser.parse_args()
+
+    trajectory_file = resolve_trajectory("push_t", args.trajectory)
+    output_dir = resolve_output_dir("push_t", args.out_dir)
     l = 0.05       # Characteristic length
     dc = 2.6429    # Limit surface rotational parameter
     x_goal = [1.0, 0.5, 0.0]  # Default goal position from push_t_penalty.cpp
     dt = 0.05      # Time step
     
-    # Optional trajectory path.
-    if len(sys.argv) > 1:
-        trajectory_file = sys.argv[1]
-
     # Use the goal recorded by the solver in the trajectory file, if present.
     try:
         with open(trajectory_file) as _gf:
@@ -542,7 +555,7 @@ if __name__ == "__main__":
         print(f"(using default goal; could not read goal from file: {_ge})")
 
     # Minimal mode removes axes, legend and title from the overlay.
-    minimal_overlay = '--minimal' in sys.argv
+    minimal_overlay = args.minimal
     
     print("="*70)
     print("PushT Trajectory Visualization")
@@ -559,5 +572,6 @@ if __name__ == "__main__":
         dc=dc,
         x_goal=x_goal,
         dt=dt,
-        minimal_overlay=minimal_overlay
+        minimal_overlay=minimal_overlay,
+        output_dir=output_dir
     )

@@ -6,3 +6,12 @@ add_executable(push_circle_impact_multiple
 
 target_include_directories(push_circle_impact_multiple PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(push_circle_impact_multiple PRIVATE impact casadi)
+
+# IMPACT solver — single shooting (state rolled out from x_0)
+add_executable(push_circle_impact_single
+    push_circle_impact_single.cpp
+    push_circle.cpp
+)
+
+target_include_directories(push_circle_impact_single PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(push_circle_impact_single PRIVATE impact casadi)

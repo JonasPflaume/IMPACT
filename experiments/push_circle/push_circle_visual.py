@@ -2,22 +2,30 @@
 """
 Disk-pushing trajectory visualizer + GIF generator.
 
-Reads a trajectory written by ``push_circle_impact_multiple`` and renders both an
-animated GIF and a static trajectory overlay. The interesting bit to watch is the
+Reads a trajectory written by either push-circle shooting driver and renders both
+an animated GIF and a static trajectory overlay. The interesting bit to watch is the
 pusher: it starts on the lower-left (where the disk's goal is), has to travel all
 the way around the disk to the far side, and only then pushes the disk down into
 the goal -- the maneuver that a local method initialized at the start cannot find.
 
 Usage:
-    python3 push_circle_visual.py <trajectory.txt> [--fps 25] [--stride 1]
+    python3 push_circle_visual.py [trajectory.txt] [--fps 25] [--stride 1]
                                   [--out <path.gif>] [--minimal]
 
 State columns : qx qy sx sy   (disk center, pusher point)
 Control columns: fn ft vx vy  (normal force, tangential friction, pusher velocity)
 """
 
+import argparse
 import os
 import sys
+from pathlib import Path
+
+_EXPERIMENTS_DIR = Path(__file__).resolve().parents[1]
+if str(_EXPERIMENTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_EXPERIMENTS_DIR))
+from visual_utils import resolve_output_dir, resolve_trajectory
+
 import numpy as np
 import matplotlib as mpl
 if not os.environ.get("DISPLAY"):
@@ -153,6 +161,7 @@ def visualize(path, fps=25, stride=1, out=None, minimal=False):
 
     if out is None:
         out = os.path.splitext(path)[0] + ".gif"
+    Path(out).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
     print(f"Saving GIF ({nframes} frames @ {fps} fps) -> {out}")
     anim.save(out, writer=animation.PillowWriter(fps=fps))
     print(f"[ok] {out}")
@@ -182,15 +191,15 @@ def visualize(path, fps=25, stride=1, out=None, minimal=False):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-    traj = sys.argv[1]
-    kw = dict(fps=25, stride=1, out=None, minimal="--minimal" in sys.argv)
-    if "--fps" in sys.argv:
-        kw["fps"] = int(sys.argv[sys.argv.index("--fps") + 1])
-    if "--stride" in sys.argv:
-        kw["stride"] = int(sys.argv[sys.argv.index("--stride") + 1])
-    if "--out" in sys.argv:
-        kw["out"] = sys.argv[sys.argv.index("--out") + 1]
-    visualize(traj, **kw)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("trajectory", nargs="?", help="trajectory file (default: newest result)")
+    parser.add_argument("--fps", type=int, default=25)
+    parser.add_argument("--stride", type=int, default=1)
+    parser.add_argument("--out", help="GIF path (default: results/push_circle/push_circle.gif)")
+    parser.add_argument("--minimal", action="store_true")
+    args = parser.parse_args()
+
+    traj = resolve_trajectory("push_circle", args.trajectory)
+    default_out = resolve_output_dir("push_circle") / "push_circle.gif"
+    out = Path(args.out).expanduser().resolve() if args.out else default_out
+    visualize(traj, fps=args.fps, stride=args.stride, out=out, minimal=args.minimal)
