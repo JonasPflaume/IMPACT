@@ -140,12 +140,6 @@ python3 /path/to/IMPACT/experiments/cart_transporter/cart_transporter_visual.py
 python3 /path/to/IMPACT/experiments/push_circle/push_circle_visual.py
 ```
 
-Disk pushing is a quasi-static pusher–slider with contact friction whose smooth
-signed-distance field enters the complementarity. It doubles as a
-local-minimum-escape test: the pusher starts at the disk's goal, so pushing from
-there moves the disk the wrong way and the solver must route the pusher around
-the disk to the far side and push it back.
-
 **Allegro hand re-orientation.** This is the MuJoCo receding-horizon MPC example
 and requires MuJoCo + GLFW:
 
