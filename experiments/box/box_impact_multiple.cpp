@@ -91,8 +91,8 @@ int main(int argc, char* argv[]) {
     config.stage_cost_weight = 0.001;
     config.final_cost_weight = 100.0;
 
-    config.rho_max = 100.0;
-    config.rho_scale = 1.1;
+    config.rho_max = 200.0;
+    config.rho_scale = 1.05;
 
     const double all_scale = 25.0;
     config.fix_point_scale = all_scale;
