@@ -14,7 +14,7 @@ target_link_libraries(allegro_impact_single
         impact
         penalty_solver  # For AllegroLCPProblem definition
         mujoco_simulation_lib
-        casadi
+        ${IMPACT_CASADI_TARGET}
         glfw
         Eigen3::Eigen
 )

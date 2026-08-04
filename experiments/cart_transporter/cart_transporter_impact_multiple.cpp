@@ -9,13 +9,15 @@
 
 #include "impact/multiple_shooting.h"
 #include "cart_transporter.h"
+#include "impact_cli.h"
 
 bool parseArgs(int argc, char* argv[], Eigen::VectorXd& x0, Eigen::VectorXd& x_goal,
-               std::string& output_file) {
-    if (argc < 9) {
-        std::cerr << "Usage: " << argv[0]
-                  << " x0_x1 x0_x2 x0_x1dot x0_x2dot goal_x1 goal_x2 goal_x1dot goal_x2dot "
-                     "[output_file]\n";
+               std::string& output_file, impact_cli::Options& opt) {
+    const int n_pos = impact_cli::firstFlagIndex(argc, argv);
+    if (n_pos < 9 || !impact_cli::parseFlags(argc, argv, n_pos, opt)) {
+        impact_cli::printUsage(argv[0],
+                               "x0_x1 x0_x2 x0_x1dot x0_x2dot goal_x1 goal_x2 goal_x1dot "
+                               "goal_x2dot");
         return false;
     }
     x0 = Eigen::VectorXd::Zero(4);
@@ -23,7 +25,7 @@ bool parseArgs(int argc, char* argv[], Eigen::VectorXd& x0, Eigen::VectorXd& x_g
     for (int i = 0; i < 4; ++i) x0(i) = std::atof(argv[1 + i]);
     for (int i = 0; i < 4; ++i) x_goal(i) = std::atof(argv[5 + i]);
 
-    if (argc >= 10) {
+    if (n_pos >= 10) {
         output_file = argv[9];
     } else {
         auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -38,6 +40,7 @@ bool parseArgs(int argc, char* argv[], Eigen::VectorXd& x0, Eigen::VectorXd& x_g
 
 void saveSolutionToFile(const impact::MultipleShootingSolution& solution, const Eigen::VectorXd& x0,
                         const Eigen::VectorXd& x_goal, int iterations, double solve_time,
+                        const std::string& planner,
                         const std::string& filename) {
     std::filesystem::path out_path(filename);
     if (out_path.has_parent_path()) {
@@ -50,7 +53,8 @@ void saveSolutionToFile(const impact::MultipleShootingSolution& solution, const 
         return;
     }
     file << std::fixed << std::setprecision(10);
-    file << "# Cart Transporter BCD-AULA Trajectory\n# Planner: bcd_aula\n# Task: cart_transporter\n\n";
+    file << "# Cart Transporter BCD-AULA Trajectory\n# Planner: " << planner
+         << "\n# Task: cart_transporter\n\n";
     file << "# Start State (x1, x2, x1_dot, x2_dot)\n";
     for (int i = 0; i < x0.rows(); ++i) file << x0(i) << (i < x0.rows() - 1 ? " " : "");
     file << "\n\n# Goal State (x1, x2, x1_dot, x2_dot)\n";
@@ -80,11 +84,12 @@ int main(int argc, char* argv[]) {
 
     Eigen::VectorXd x0, x_goal;
     std::string output_file;
-    if (!parseArgs(argc, argv, x0, x_goal, output_file)) return 1;
+    impact_cli::Options cli;
+    if (!parseArgs(argc, argv, x0, x_goal, output_file, cli)) return 1;
 
     auto problem = std::make_shared<cart_transporter::CartTransporter>();
 
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = 300;
     config.x_0 = x0;
     config.x_goal = x_goal;
@@ -114,10 +119,13 @@ int main(int argc, char* argv[]) {
     config.newton_max_iter = 100;
     config.newton_tol = 1e-6;
     config.newton_regularization = 1e-5;
-    config.use_saddle = true;
 
     config.use_constant_state_init = true;
     config.print_level = 1;
+
+    impact_cli::apply(cli, config);
+    const std::string planner = impact_cli::plannerTag(cli, "bcd_aula");
+    impact_cli::printSettings(cli, config);
 
     impact::MultipleShootingSolver solver(problem);
     impact::MultipleShootingSolution solution = solver.solve(config);
@@ -134,9 +142,13 @@ int main(int argc, char* argv[]) {
               << "]" << std::endl;
     std::cout << "Goal state:  [" << config.x_goal.transpose() << "]" << std::endl;
     std::cout << "Complementarity violation: " << solution.complementarity_violation << std::endl;
+    std::cout << "Total GN iterations: " << solution.total_gn_iterations << std::endl;
+    impact_cli::printResultLine(
+        planner, solution,
+        (solution.state_trajectory.col(config.horizon) - config.x_goal).lpNorm<Eigen::Infinity>());
 
     saveSolutionToFile(solution, config.x_0, config.x_goal, solution.total_inner_iterations,
-                       solution.solve_time, output_file);
+                       solution.solve_time, planner, output_file);
 
     Eigen::VectorXd final_state = solution.state_trajectory.col(config.horizon);
     double position_error = (final_state.head(2) - config.x_goal.head(2)).norm();

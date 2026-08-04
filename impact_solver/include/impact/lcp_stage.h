@@ -3,7 +3,7 @@
 #include <Eigen/Dense>
 #include <memory>
 
-#include "impact/bcd_aula_config.h"
+#include "impact/aula_config.h"
 #include "impact/lcp_problem.h"
 #include "impact/stage_problem.h"
 
@@ -28,7 +28,7 @@ namespace impact {
  */
 class LCPStage : public StageProblem {
    public:
-    LCPStage(std::shared_ptr<LCPProblem> problem, const BCDAULAConfig& config);
+    LCPStage(std::shared_ptr<LCPProblem> problem, const AulaConfig& config);
 
     int stateDim() const override { return n_qpos_; }
     int controlDim() const override { return n_cmd_ + n_lam_ + n_qvel_; }

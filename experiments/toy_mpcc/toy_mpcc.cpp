@@ -21,15 +21,22 @@
 #include <iostream>
 #include <vector>
 
-#include "impact/bcd_aula_config.h"
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_config.h"
+#include "impact/aula_solver.h"
 #include "impact/mpcc_subproblem.h"
+#include "impact_cli.h"
 
 int main(int argc, char* argv[]) {
     using casadi::SX;
 
     Eigen::Vector4d z0(0.0, 0.0, 0.0, 0.0);  // start from biactive points
-    if (argc >= 5) {
+    impact_cli::Options cli;
+    const int n_pos = impact_cli::firstFlagIndex(argc, argv);
+    if (!impact_cli::parseFlags(argc, argv, n_pos, cli)) {
+        impact_cli::printUsage(argv[0], "[x1_0 x2_0 x3_0 x4_0]");
+        return 1;
+    }
+    if (n_pos >= 5) {
         z0(0) = std::atof(argv[1]);
         z0(1) = std::atof(argv[2]);
         z0(2) = std::atof(argv[3]);
@@ -57,7 +64,7 @@ int main(int argc, char* argv[]) {
     impact::MPCCSubproblem mpcc = impact::buildMPCC(desc);
 
     // Solver configuration.
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.max_outer_iters = 300;
     config.max_inner_iters = 50;
     config.rho_scale = 1.5;
@@ -65,11 +72,14 @@ int main(int argc, char* argv[]) {
     config.outer_tol_h = 1e-7;
     config.outer_tol_comp = 1e-7;
     config.newton_max_iter = 50;
-    config.use_saddle = true;
     config.print_level = 1;  // print the per-outer trace
 
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(*mpcc.sub, config, Eigen::VectorXd(z0));
+    impact_cli::apply(cli, config);
+    const std::string planner = impact_cli::plannerTag(cli, "bcd_aula");
+    impact_cli::printSettings(cli, config);
+
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(*mpcc.sub, config, Eigen::VectorXd(z0));
 
     const double comp0 = std::abs(r.z(0) * r.z(1));
     const double comp1 = std::abs(r.z(2) * r.z(3));
@@ -80,6 +90,8 @@ int main(int argc, char* argv[]) {
               << "  complementarity x1*x2 = " << comp0 << "\n"
               << "  complementarity x3*x4 = " << comp1 << "\n"
               << "  outer / inner iters  = " << r.outer_iterations << " / "
-              << r.total_inner_iterations << "\n";
+              << r.total_inner_iterations << "\n"
+              << "  GN iterations        = " << r.total_gn_iterations << "\n";
+    impact_cli::printResultLine(planner, r, 0.0);
     return 0;
 }

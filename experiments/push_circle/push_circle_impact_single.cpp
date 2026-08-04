@@ -19,9 +19,10 @@
 #include <memory>
 #include <sstream>
 
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_solver.h"
 #include "impact/mpcc_stage.h"
 #include "impact/single_shooting.h"
+#include "impact_cli.h"
 #include "push_circle.h"
 
 struct Scenario {
@@ -36,10 +37,17 @@ int main(int argc, char* argv[]) {
               << std::endl;
 
     Scenario sc;
-    if (argc >= 2) sc.D = std::atof(argv[1]);
-    if (argc >= 3) sc.angle_deg = std::atof(argv[2]);
-    if (argc >= 4) sc.horizon = std::atoi(argv[3]);
-    if (argc >= 5) {
+    impact_cli::Options cli;
+    // Positionals stop at the first --flag, so any invocation can grow a flag tail.
+    const int n_pos = impact_cli::firstFlagIndex(argc, argv);
+    if (!impact_cli::parseFlags(argc, argv, n_pos, cli)) {
+        impact_cli::printUsage(argv[0], "D angle_deg [horizon]");
+        return 1;
+    }
+    if (n_pos >= 2) sc.D = std::atof(argv[1]);
+    if (n_pos >= 3) sc.angle_deg = std::atof(argv[2]);
+    if (n_pos >= 4) sc.horizon = std::atoi(argv[3]);
+    if (n_pos >= 5) {
         sc.output_file = argv[4];
     } else {
         const auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -81,7 +89,7 @@ int main(int argc, char* argv[]) {
     std::cout << "x0    = [" << x0.transpose() << "]\n";
     std::cout << "goal  = [" << x_goal.transpose() << "]\n";
 
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = sc.horizon;
     config.x_0 = x0;
     config.x_goal = x_goal;
@@ -109,6 +117,11 @@ int main(int argc, char* argv[]) {
     config.use_saddle = true;
     config.print_level = 1;
 
+    // Trailing flags override the tuned defaults above; an invocation without
+    // any flag is unchanged.
+    impact_cli::apply(cli, config);
+    impact_cli::printSettings(cli, config);
+
     impact::MPCCStage stage(problem, config);
     impact::SingleShootingLayout layout = impact::buildSingleShooting(stage, config);
     impact::AulaSubproblem& sub = *layout.sub;
@@ -116,8 +129,8 @@ int main(int argc, char* argv[]) {
     sub.setParamValue(layout.off_x0, x0);
 
     Eigen::VectorXd z = Eigen::VectorXd::Zero(sub.numOpt());
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult solution = solver.solve(sub, config, z);
+    impact::AulaSolver solver;
+    impact::AulaResult solution = solver.solve(sub, config, z);
 
     const int nx = problem->getStateDim();
     const int nu = problem->getControlDim();
@@ -148,6 +161,13 @@ int main(int argc, char* argv[]) {
               << "]" << std::endl;
     std::cout << "Goal disk:   [" << x_goal.head(2).transpose() << "]" << std::endl;
     std::cout << "Complementarity violation: " << solution.complementarity_violation << std::endl;
+    std::cout << "Total GN iterations: " << solution.total_gn_iterations << std::endl;
+    // Goal error is the disk error: the pusher's terminal target is a placement
+    // convention, not part of the task.
+    impact_cli::printResultLine(
+        "bcd_aula_single", solution,
+        (state_trajectory.col(sc.horizon).head(2) - x_goal.head(2))
+            .lpNorm<Eigen::Infinity>());
 
     const std::filesystem::path out_path(sc.output_file);
     if (out_path.has_parent_path()) {

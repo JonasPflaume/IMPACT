@@ -34,30 +34,134 @@ optimization, but the solver can also be used on a generic MPCC.
 
 The solver code is shared across all examples. A task supplies the symbolic
 problem data, then a shooting builder assembles the MPCC passed to
-`BCDAULASolver`. The CITO experiments in the paper use the multiple-shooting
+`AulaSolver`. The CITO experiments in the paper use the multiple-shooting
 front-end.
 
-## Build
+## Python
+
+`pip install .` builds the solver and installs it as a Python package. Models are
+written in Python with the CasADi Python API; only the augmented-Lagrangian solve
+runs in C++.
+
+```bash
+pip install .            # solver only
+pip install '.[all]'     # + MuJoCo simulation, visualizers, tests
+```
+
+Two packages live under `python/`, and the split is the point:
+
+| | what it is | installed by `pip install .`? |
+|---|---|---|
+| `impact` | the solver: generic MPCC assembly, both shooting transcriptions, the AuLa solve. **Knows no tasks.** | yes |
+| `examples` | this repository's task models, tuned settings, drivers and visualizers | no — repository material |
+
+```python
+import numpy as np
+import casadi as ca
+from impact import AulaConfig, BlockOptions, MPCCDescription, Solver, build_mpcc
+
+#   minimize ||z - [0.8, 0.2]||^2   s.t.   0 <= z1 (perp) z2 >= 0
+z = ca.SX.sym("z", 2)
+desc = MPCCDescription(z=z, cost=z - ca.DM([0.8, 0.2]), cost_is_linear=True)
+desc.add_complementarity("pair", z[0], z[1], BlockOptions(tol=1e-8))
+
+result = Solver().solve(build_mpcc(desc).subproblem, AulaConfig(), np.zeros(2))
+print(result.z, result.converged)
+```
+
+For a trajectory problem, describe one stage as an `impact.MPCCProblem` (explicit
+ODE) or an `impact.LCPProblem` (contact) and hand it to a shooting front-end:
+
+```python
+solution = MultipleShootingSolver(MyTask()).solve(config)
+solution.state_trajectory        # nx x (horizon + 1)
+```
+
+### Running the example tasks
+
+Everything task-specific lives in [`python/examples/`](python/examples/), one
+directory per example — `task.py` (the model and its tuned config), `viz.py` (how
+to draw it) and `main.py` (the command line). Nothing registers them: `run.py`
+lists the directories that have a `main.py`, so adding an example is adding a
+directory.
+
+```bash
+python python/examples/run.py list                     # every example, with its summary
+python python/examples/run.py push_t --visualize       # solve, save, render
+python python/examples/run.py push_circle --distance 1.5 --angle 225 --horizon 100
+python python/examples/run.py box --start 0 0 0 --goal 0.1 0.1 1.0 --tol 1e-6
+python python/examples/run.py allegro --object cube --max-steps 100 --render
+python python/examples/run.py push_circle --render-only   # newest trajectory -> GIF
+python python/examples/run.py push_circle --print-config  # the tuned settings, as JSON
+```
+
+Every example is equally runnable on its own —
+`python python/examples/push_t/main.py --visualize` is the same run as
+`run.py push_t --visualize`. `python -m examples.run ...` also works wherever
+`python/` is on the import path (an editable install, or running from inside
+`python/`). The path form above works regardless, so it is the one quoted
+throughout.
+
+or from Python, where a task's `solve()` is the whole API:
+
+```python
+from examples.push_circle.task import config, solve
+
+cfg = config(horizon=100)
+cfg.rho_max = 400.0
+result = solve(cfg)
+print(result.summary())
+result.save()              # results/push_circle/bcd_aula/trajectory_<ms>.txt
+
+from examples.push_circle.viz import render
+render(result.path)        # results/push_circle/push_circle.gif
+```
+
+A guided tour of the whole Python surface is in
+[`python/examples/notebooks/push_circle.ipynb`](python/examples/notebooks/push_circle.ipynb).
+
+**How the split works.** Python derives the augmented-Lagrangian residual and
+its Jacobian as CasADi functions, then
+hands them to the solver in CasADi's own serialized form together with the block
+offsets it chose. Nothing symbolic is built in C++, and no CasADi type appears in
+the binding signatures. The extension links the `libcasadi` that ships inside the
+`casadi` wheel, so both sides of that boundary are the same library build by
+construction rather than by version negotiation.
+
+`python/tests/test_parity.py` pins the port: for every task, both shooting
+transcriptions and both inner solvers, the Python-built residual and Jacobian are
+compared against the C++ builders' at random points and must agree **to the last
+bit**. Writing your own task means subclassing `impact.MPCCProblem` (explicit
+ODE), `impact.LCPProblem` (contact), or building an `impact.MPCCDescription`
+directly — `python/examples/box/task.py`, `allegro/task.py` and `toy/task.py` are
+one of each.
+
+Solver hyper-parameters are the C++ `AulaConfig` struct itself, exposed field for
+field (`impact.config_to_dict(AulaConfig())` lists all 60), so the Python defaults
+are the solver's defaults and cannot drift.
+
+## Build (C++ drivers)
 
 Dependencies: CMake ≥ 3.15, Eigen3, CasADi, BLAS/LAPACK. The Allegro demo also
 needs MuJoCo and GLFW.
 
-For the planar CITO experiments, the quickest path is the Docker image:
+For a self-contained demo, the quickest path is the Docker image. It installs the
+Python bindings, solves Push-T, and renders the trajectory it found:
 
 ```bash
 docker build -t impact .
 
-# Runs the box-pushing multiple-shooting example with default arguments
+# Solve Push-T and render the result into ./results/push_t/
 docker run --rm -v "$PWD/results:/workspace/impact/results" impact
 
-# Other CITO examples
-docker run --rm -v "$PWD/results:/workspace/impact/results" impact push_t
-docker run --rm -v "$PWD/results:/workspace/impact/results" impact cart
+# Any other task, same image
+docker run --rm -v "$PWD/results:/workspace/impact/results" impact run box --visualize
+docker run --rm impact run list
 ```
 
-The Docker build disables the MuJoCo/Allegro target so the planar experiments do
-not require MuJoCo or GLFW. Run `docker run --rm impact help` to see all wrapper
-commands.
+The image builds only the Python extension — no C++ driver executables, no
+MuJoCo, no GLFW — so it stays small and works on x86_64 and arm64 alike. Run
+`docker run --rm impact help` to see all wrapper commands.
 
 The container runs as root, so files written to the mounted `results/` directory
 are root-owned on Linux hosts; add `--user "$(id -u):$(id -g)"` to the
@@ -81,20 +185,42 @@ impact_solver/            solver library (target: impact)
   include/impact/
     stage_problem.h          common per-stage task interface
     mpcc_subproblem.h        buildMPCC(), the direct MPCC assembly entry point
-    bcd_aula_solver.h        BCDAULASolver (outer AuLa + inner BCD)
+    aula_solver.h            AulaSolver (outer AuLa; inner BCD)
     multiple_shooting.h      builder/front-end for multiple shooting
     single_shooting.h        builder/front-end for single shooting
     mpcc_stage.h, lcp_stage.h
-    gauss_newton_solver.h, complementarity_projection.h, ...
+    gauss_newton_solver.h    inner damped Gauss-Newton (LM) X-solver
+    complementarity_projection.h, dual_block.h, saddle_layout.h, ...
 experiments/              box / push_t / cart_transporter (multiple-shooting MPCC),
                           allegro (single-shooting LCP), toy_mpcc (generic MPCC)
+    parity_dump/             dumps a C++-built subproblem for the Python parity test
 penalty_solver/, relax_solver/   IPOPT / Scholtes baselines (same problem interface)
 simulation/               MuJoCo wrapper (allegro)
 resources/                allegro MuJoCo models
+
+python/
+  src/bindings.cpp        pybind11 module (solver only; no CasADi in any signature)
+  impact/                 THE SOLVER -- installed by pip; contains no task
+    mpcc.py                 build_mpcc(): the Python side of buildMPCC()
+    shooting.py             multiple/single shooting builders + front-ends
+    stage.py                StageProblem / MPCCProblem / LCPProblem + adapters
+    config.py               AulaConfig as data (to/from dict, keyword apply)
+    report.py               planner tags, the RESULT line, tolerance coupling
+  examples/               THE TASKS -- repository material, not installed
+    run.py                  dispatcher; finds examples by looking, registers nothing
+    <example>/              one directory per example:
+      task.py                 the model, its tuned AulaConfig, solve()
+      viz.py                  how to draw a saved trajectory of it
+      main.py                 the command line -- runnable on its own
+    toy, push_circle, box, push_t, cart_transporter,
+    allegro (+ sim.py, MuJoCo)
+    common/                 trajectory format, shared CLI flags, Result
+    notebooks/              push_circle.ipynb, the guided tour
+  tests/                  parity against the C++ builders + task regressions
 ```
 
 Pipeline: `StageProblem` → `build{Single,Multiple}Shooting` → `buildMPCC` →
-`AulaSubproblem` → `BCDAULASolver`. Trajectory problems normally go through one
+`AulaSubproblem` → `AulaSolver`. Trajectory problems normally go through one
 of the shooting builders. A non-trajectory MPCC can call `buildMPCC` directly.
 
 ## Experiments
@@ -153,6 +279,38 @@ flashlight, foambrick, light_bulb, mug, piggy_bank, rubber_duck, stick, teapot,
 torus, water_bottle}. Other flags: `--seed <n>`, `--save-video <path>` (with
 `--render`), `--horizon <h>`, `--max-inner-iters <n>`, `--no-saddle`.
 
+## Where the solve time goes
+
+`AulaResult` reports `eval_time` (CasADi residual/Jacobian evaluations)
+and `factor_time` (sparse LDLᵀ factorizations and triangular solves) alongside
+`solve_time`, so the question "would a faster linear-algebra backend help?" is a
+measurement rather than a guess. Measured on this machine:
+
+| task | n_opt | solve | eval | factor | other |
+|---|---|---|---|---|---|
+| push_circle H100 | 804 | 40 ms | 47% | 37% | 15% |
+| box H50 | 453 | 25 ms | 48% | 28% | 24% |
+| push_t H50 | 1353 | 352 ms | 43% | 38% | 19% |
+| cart H300 | 2404 | 14 ms | 40% | 14% | 46% |
+| allegro H4 (single) | 472 | 6.7 ms | 36% | 22% | 42% |
+
+The two are co-dominant, with evaluation consistently the larger. Two consequences:
+
+* **A faster factorization is capped at 14–38%.** Doubling its speed buys 7–19%
+  overall. Eigen's `SimplicialLDLT` already uses AMD, and there is no free win in
+  the ordering — in its natural ordering the saddle matrix is essentially
+  full-bandwidth (2006 of 2010 for push_circle), so the reordering is doing real
+  work. Beating it needs a better *kernel* (CHOLMOD, MKL PARDISO, MUMPS), i.e. a
+  new system dependency, for a bounded return.
+* **Compiling the CasADi functions buys the evaluation half, and only that.**
+  With `config.jit = True` the results stay bit-identical and evaluation gets
+  1.3–1.4× faster (push_circle 18.3 → 13.2 ms, push_t 154 → 120 ms, medians of 5),
+  which is a 1.15× win on total solve time — because factorization, the other half,
+  is untouched. It is paid for in build time, and `-O1` / `-O2 -march=native` change
+  nothing versus `-O0` while costing seconds more of it: SX codegen emits one huge
+  flat C function that gcc's optimizer scales badly on. Worth enabling for repeated
+  solves on one problem, not for a single solve. Off by default.
+
 ## Numerical scaling
 
 State and control variables can have different physical units and numerical
@@ -168,7 +326,7 @@ The example below solves
 
 ```cpp
 #include "impact/mpcc_subproblem.h"
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_solver.h"
 using casadi::SX;
 
 SX z = SX::sym("z", 2);
@@ -182,9 +340,9 @@ d.constraints.push_back({impact::MPCCConstraint::Complementarity, "comp",
                          /*scale=*/1.0, /*rho_init=*/1.0, /*tol=*/1e-8});
 
 impact::MPCCSubproblem mpcc = impact::buildMPCC(d);
-impact::BCDAULAConfig cfg;            // tweak rho_scale, tolerances, use_saddle, ...
+impact::AulaConfig cfg;            // tweak rho_scale, tolerances, use_saddle, ...
 Eigen::VectorXd z0(2); z0 << 0.6, 0.4;
-impact::BCDAULAResult r = impact::BCDAULASolver().solve(*mpcc.sub, cfg, z0);
+impact::AulaResult r = impact::AulaSolver().solve(*mpcc.sub, cfg, z0);
 // r.z, r.objective_value, r.converged, r.complementarity_violation
 ```
 

@@ -5,7 +5,7 @@ add_executable(cart_transporter_penalty
 )
 
 target_include_directories(cart_transporter_penalty PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cart_transporter_penalty PRIVATE penalty_solver impact casadi)
+target_link_libraries(cart_transporter_penalty PRIVATE penalty_solver impact ${IMPACT_CASADI_TARGET})
 
 # Scholtes Relaxation solver executable
 add_executable(cart_transporter_relaxation
@@ -14,7 +14,7 @@ add_executable(cart_transporter_relaxation
 )
 
 target_include_directories(cart_transporter_relaxation PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cart_transporter_relaxation PRIVATE relaxation_solver impact casadi)
+target_link_libraries(cart_transporter_relaxation PRIVATE relaxation_solver impact ${IMPACT_CASADI_TARGET})
 
 # IMPACT solver — multiple shooting (state free, dynamics as defect)
 add_executable(cart_transporter_impact_multiple
@@ -22,8 +22,8 @@ add_executable(cart_transporter_impact_multiple
     cart_transporter.cpp
 )
 
-target_include_directories(cart_transporter_impact_multiple PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cart_transporter_impact_multiple PRIVATE impact casadi)
+target_include_directories(cart_transporter_impact_multiple PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(cart_transporter_impact_multiple PRIVATE impact ${IMPACT_CASADI_TARGET})
 
 # IMPACT solver — single shooting (state rolled out from x_0)
 add_executable(cart_transporter_impact_single
@@ -31,5 +31,5 @@ add_executable(cart_transporter_impact_single
     cart_transporter.cpp
 )
 
-target_include_directories(cart_transporter_impact_single PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(cart_transporter_impact_single PRIVATE impact casadi)
+target_include_directories(cart_transporter_impact_single PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(cart_transporter_impact_single PRIVATE impact ${IMPACT_CASADI_TARGET})

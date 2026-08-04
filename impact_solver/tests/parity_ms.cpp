@@ -1,7 +1,7 @@
 // Multiple-shooting smoke test: run box / push_t / cart_transporter through the
 // impact::MultipleShootingSolver and check each converges.
 //
-// (The exact same-binary equivalence against the legacy aula::MPCCBCDAULASolver
+// (The exact same-binary equivalence against the legacy aula::MPCCAulaSolver
 // was verified during migration; once the legacy solver was retired this became a
 // standalone convergence check.)
 //
@@ -16,8 +16,8 @@
 #include "impact/multiple_shooting.h"
 #include "push_t.h"
 
-static impact::BCDAULAConfig boxConfig(const Eigen::VectorXd& x0, const Eigen::VectorXd& goal) {
-    impact::BCDAULAConfig c;
+static impact::AulaConfig boxConfig(const Eigen::VectorXd& x0, const Eigen::VectorXd& goal) {
+    impact::AulaConfig c;
     c.horizon = 50;
     c.x_0 = x0;
     c.x_goal = goal;
@@ -40,13 +40,12 @@ static impact::BCDAULAConfig boxConfig(const Eigen::VectorXd& x0, const Eigen::V
     c.newton_max_iter = 50;
     c.newton_tol = 1e-6;
     c.newton_regularization = 2e-5;
-    c.use_saddle = true;
     c.print_level = 0;
     return c;
 }
 
-static impact::BCDAULAConfig pushtConfig(const Eigen::VectorXd& x0, const Eigen::VectorXd& goal) {
-    impact::BCDAULAConfig c;
+static impact::AulaConfig pushtConfig(const Eigen::VectorXd& x0, const Eigen::VectorXd& goal) {
+    impact::AulaConfig c;
     c.horizon = 50;
     c.x_0 = x0;
     c.x_goal = goal;
@@ -70,13 +69,12 @@ static impact::BCDAULAConfig pushtConfig(const Eigen::VectorXd& x0, const Eigen:
     c.newton_max_iter = 200;
     c.newton_tol = 1e-6;
     c.newton_regularization = 5e-5;
-    c.use_saddle = true;
     c.print_level = 0;
     return c;
 }
 
-static impact::BCDAULAConfig cartConfig(const Eigen::VectorXd& x0, const Eigen::VectorXd& goal) {
-    impact::BCDAULAConfig c;
+static impact::AulaConfig cartConfig(const Eigen::VectorXd& x0, const Eigen::VectorXd& goal) {
+    impact::AulaConfig c;
     c.horizon = 300;
     c.x_0 = x0;
     c.x_goal = goal;
@@ -99,7 +97,6 @@ static impact::BCDAULAConfig cartConfig(const Eigen::VectorXd& x0, const Eigen::
     c.newton_max_iter = 100;
     c.newton_tol = 1e-6;
     c.newton_regularization = 1e-5;
-    c.use_saddle = true;
     c.use_constant_state_init = true;
     c.print_level = 0;
     return c;
@@ -121,7 +118,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < dim; ++i) goal(i) = std::atof(argv[2 + dim + i]);
 
     std::shared_ptr<impact::MPCCProblem> problem;
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     if (task == "box") {
         problem = std::make_shared<box_pushing::BoxPushing>();
         config = boxConfig(x0, goal);

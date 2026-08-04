@@ -24,10 +24,16 @@ target_include_directories(impact
 target_link_libraries(impact
     PUBLIC
         Eigen3::Eigen
-        BLAS::BLAS
-        LAPACK::LAPACK
-        casadi
+        # IMPACT_CASADI_TARGET is casadi::casadi where the package config provides
+        # it. That target carries the string ABI the CasADi binary was built with,
+        # which has to reach every translation unit that passes a std::string to
+        # CasADi -- including the Python extension linked on top of this library.
+        ${IMPACT_CASADI_TARGET}
 )
+
+if(TARGET BLAS::BLAS AND TARGET LAPACK::LAPACK)
+    target_link_libraries(impact PUBLIC BLAS::BLAS LAPACK::LAPACK)
+endif()
 
 target_compile_features(impact PUBLIC cxx_std_17)
 

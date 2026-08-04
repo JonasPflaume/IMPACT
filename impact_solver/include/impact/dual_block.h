@@ -11,7 +11,7 @@ namespace impact {
  *
  * Each block owns its penalty rho and multiplier kappa, evaluates its scaled
  * residual c(z), and declares whether it is an equality or a one-sided
- * inequality. BCDAULASolver applies the same safeguarded update to every block.
+ * inequality. AulaSolver applies the same safeguarded update to every block.
  *
  *   Equality   : kappa <- kappa + rho * c ;   violation = ||c||_inf
  *   Inequality : kappa <- max(0, kappa + rho * c) ; violation = ||max(c,0)||_inf

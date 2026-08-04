@@ -1,0 +1,71 @@
+[build-system]
+# CasADi is a *build* requirement as well as a runtime one: the extension is
+# compiled against the headers and libcasadi that ship inside the wheel, which is
+# what keeps the serialized-function boundary version-consistent by construction.
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12", "casadi>=3.7,<3.8"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "impact-solver"
+version = "0.1.0"
+description = "An implicit active-set augmented Lagrangian for fast contact-implicit trajectory optimization"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Jiayun Li" },
+    { name = "Dejian Gong" },
+    { name = "Georgia Chalvatzaki" },
+]
+keywords = ["trajectory-optimization", "MPCC", "contact", "robotics", "augmented-lagrangian"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+dependencies = [
+    # Pinned to the 3.7 series: the extension links libcasadi.so.3.7 by SONAME
+    # from this package's directory, so a different series would be a different
+    # ABI and a different serialization format.
+    "casadi>=3.7,<3.8",
+    "numpy>=1.23",
+]
+
+# Extras for the repository's `python/examples/`, which are not installed by this
+# wheel -- the solver itself needs nothing beyond casadi and numpy.
+[project.optional-dependencies]
+sim = ["mujoco>=3.0"]
+viz = ["matplotlib>=3.5", "pillow>=9.0"]
+test = ["pytest>=7.0"]
+all = ["mujoco>=3.0", "matplotlib>=3.5", "pillow>=9.0", "pytest>=7.0"]
+
+[project.urls]
+Homepage = "https://jonaspflaume.github.io/impact_info/"
+Paper = "https://arxiv.org/abs/2605.09127"
+
+[tool.scikit-build]
+minimum-version = "0.10"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/impact"]
+cmake.version = ">=3.15"
+cmake.build-type = "Release"
+# `wheel.packages` above is deliberately just `python/impact`: `python/examples`
+# is repository material (task models, tuned settings, drivers, visualizers), not
+# part of the solver, so it ships in the sdist but never in the wheel.
+sdist.include = ["impact_solver/**", "python/**", "CMakeLists.txt", "LICENSE", "README.md"]
+
+[tool.scikit-build.cmake.define]
+IMPACT_BUILD_PYTHON = "ON"
+# The wheel needs neither the C++ driver executables nor MuJoCo/GLFW.
+IMPACT_BUILD_EXPERIMENTS = "OFF"
+IMPACT_BUILD_ALLEGRO = "OFF"
+# Host-specific codegen, matching the benchmark builds. Set to OFF (e.g.
+# `CMAKE_ARGS="-DIMPACT_NATIVE_ARCH=OFF" pip install .`) when building a wheel
+# meant to run on a different machine.
+IMPACT_NATIVE_ARCH = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+markers = ["slow: multi-second solves; deselect with -m 'not slow'"]

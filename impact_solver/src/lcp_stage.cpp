@@ -13,7 +13,7 @@ SX eigenToSX(const Eigen::VectorXd& v) {
 }
 }  // namespace
 
-LCPStage::LCPStage(std::shared_ptr<LCPProblem> problem, const BCDAULAConfig& config)
+LCPStage::LCPStage(std::shared_ptr<LCPProblem> problem, const AulaConfig& config)
     : problem_(std::move(problem)) {
     n_qpos_ = problem_->getConfigDim();
     n_qvel_ = problem_->getVelocityDim();

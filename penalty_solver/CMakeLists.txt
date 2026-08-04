@@ -22,7 +22,7 @@ target_link_libraries(penalty_solver
     PUBLIC
         impact
         Eigen3::Eigen
-        casadi
+        ${IMPACT_CASADI_TARGET}
 )
 
 target_compile_features(penalty_solver PUBLIC cxx_std_17)

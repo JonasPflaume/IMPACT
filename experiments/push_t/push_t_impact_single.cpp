@@ -18,16 +18,18 @@
 #include <iostream>
 #include <memory>
 
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_solver.h"
 #include "impact/mpcc_stage.h"
 #include "impact/single_shooting.h"
+#include "impact_cli.h"
 #include "push_t.h"
 
 int main(int argc, char* argv[]) {
     std::cout << "=== Push-T MPCC with BCD-AuLa (IMPACT) — SINGLE SHOOTING ===" << std::endl;
-    if (argc < 7) {
-        std::cerr << "Usage: " << argv[0]
-                  << " x0_px x0_py x0_theta goal_px goal_py goal_theta\n";
+    impact_cli::Options cli;
+    const int n_pos = impact_cli::firstFlagIndex(argc, argv);
+    if (n_pos < 7 || !impact_cli::parseFlags(argc, argv, n_pos, cli)) {
+        impact_cli::printUsage(argv[0], "x0_px x0_py x0_theta goal_px goal_py goal_theta");
         return 1;
     }
     Eigen::VectorXd x0(3), x_goal(3);
@@ -39,7 +41,7 @@ int main(int argc, char* argv[]) {
     auto problem = std::make_shared<push_t::PushT>();
 
     // Same settings as the multiple-shooting driver; only the transcription differs.
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = 50;
     config.x_0 = x0;
     config.x_goal = x_goal;
@@ -66,9 +68,12 @@ int main(int argc, char* argv[]) {
     config.newton_tol = 1e-6;
     config.newton_regularization = 5e-5;
     config.print_level = 1;
-    config.use_saddle = true;
 
     // Build the single-shooting subproblem from the same MPCCStage.
+    impact_cli::apply(cli, config);
+    const std::string planner = impact_cli::plannerTag(cli, "bcd_aula");
+    impact_cli::printSettings(cli, config);
+
     impact::MPCCStage stage(problem, config);
     impact::SingleShootingLayout layout = impact::buildSingleShooting(stage, config);
     impact::AulaSubproblem& sub = *layout.sub;
@@ -77,8 +82,8 @@ int main(int argc, char* argv[]) {
 
     Eigen::VectorXd z = Eigen::VectorXd::Zero(sub.numOpt());  // U = 0 warm start
 
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(sub, config, z);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(sub, config, z);
 
     // Roll out the final state from the optimized controls.
     const int nu = problem->getControlDim();
@@ -104,5 +109,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Final state: [" << x.transpose() << "]" << std::endl;
     std::cout << "Goal state:  [" << x_goal.transpose() << "]" << std::endl;
     std::cout << "Complementarity violation: " << r.complementarity_violation << std::endl;
+    std::cout << "Total GN iterations: " << r.total_gn_iterations << std::endl;
+    impact_cli::printResultLine(planner, r, (x - x_goal).lpNorm<Eigen::Infinity>());
     return 0;
 }

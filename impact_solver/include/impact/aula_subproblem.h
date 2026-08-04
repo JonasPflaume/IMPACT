@@ -11,7 +11,7 @@
 namespace impact {
 
 /**
- * @brief Data container passed to BCDAULASolver.
+ * @brief Data container passed to AulaSolver.
  *
  * Built by the shooting builders or by buildMPCC(). It owns the least-squares
  * residual r(z; p), its Jacobian, the persistent parameter buffer p, the AuLa
@@ -86,7 +86,7 @@ class AulaSubproblem {
    private:
     casadi::Function residual_func_;
     casadi::Function jacobian_func_;
-    casadi::Function gh_func_;  // z -> {G_all, H_all}
+    casadi::Function gh_func_;        // z -> {G_all, H_all}
     SaddleLayout layout_;
     int n_opt_ = 0;
 

@@ -5,8 +5,8 @@
 #include <string>
 
 #include "impact/aula_subproblem.h"
-#include "impact/bcd_aula_config.h"
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_config.h"
+#include "impact/aula_solver.h"
 #include "impact/problem.h"
 #include "impact/stage_problem.h"
 
@@ -29,7 +29,7 @@ struct MultipleShootingLayout {
  * condition as a second equality block.
  */
 MultipleShootingLayout buildMultipleShooting(const StageProblem& stage,
-                                             const BCDAULAConfig& config);
+                                             const AulaConfig& config);
 
 /**
  * @brief Solution of a multiple-shooting solve (trajectories + solver stats).
@@ -43,9 +43,16 @@ struct MultipleShootingSolution {
     double equality_violation = 0.0;
     double inequality_violation = 0.0;
     double complementarity_violation = 0.0;
+    double stationarity_violation = 0.0;
+    // Tolerance-free MPCC complementarity certificate; see AulaResult.
+    double comp_neg_G = 0.0;
+    double comp_neg_H = 0.0;
+    double comp_support_G = 0.0;
+    double comp_support_H = 0.0;
     bool converged = false;
     int outer_iterations = 0;
     int total_inner_iterations = 0;
+    int total_gn_iterations = 0;
     double solve_time = 0.0;
     std::string status_message;
 };
@@ -54,15 +61,15 @@ struct MultipleShootingSolution {
  * @brief Thin multiple-shooting front-end for MPCC tasks.
  *
  * Wraps the task in an MPCCStage, builds the subproblem, flattens the initial
- * guess, runs BCDAULASolver, and reshapes z into (X, U).
+ * guess, runs AulaSolver, and reshapes z into (X, U).
  */
 class MultipleShootingSolver {
    public:
     explicit MultipleShootingSolver(std::shared_ptr<MPCCProblem> problem)
         : problem_(std::move(problem)) {}
 
-    MultipleShootingSolution solve(const BCDAULAConfig& config);
-    MultipleShootingSolution solveWithInitialGuess(const BCDAULAConfig& config,
+    MultipleShootingSolution solve(const AulaConfig& config);
+    MultipleShootingSolution solveWithInitialGuess(const AulaConfig& config,
                                                    const Eigen::MatrixXd& x_init,
                                                    const Eigen::MatrixXd& u_init);
 

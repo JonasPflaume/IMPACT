@@ -1,5 +1,7 @@
 #include "impact/gauss_newton_solver.h"
 
+#include <chrono>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -9,6 +11,18 @@
 namespace impact {
 
 namespace {
+
+/// Adds its lifetime to an accumulator. steady_clock, not high_resolution_clock:
+/// libstdc++ aliases the latter to the non-monotonic system_clock.
+struct ScopedTimer {
+    double& total;
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    explicit ScopedTimer(double& t) : total(t) {}
+    ~ScopedTimer() {
+        total += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    }
+};
+
 // Finite test that still works with Release builds using -ffast-math. Some
 // compilers may fold std::isfinite() away under -ffinite-math-only, so the step
 // guards below inspect the IEEE-754 exponent bits directly.
@@ -260,9 +274,10 @@ bool GaussNewtonSolver::solveSaddleStep(double lambda, const Eigen::VectorXd& rh
         ldlt_saddle_.analyzePattern(M_);
         saddle_pattern_analyzed_ = true;
     }
-    ldlt_saddle_.factorize(M_);
+    { ScopedTimer timer(factor_seconds_); ldlt_saddle_.factorize(M_); }
     if (ldlt_saddle_.info() != Eigen::Success) return false;
 
+    ScopedTimer solve_timer(factor_seconds_);
     Eigen::VectorXd sol = ldlt_saddle_.solve(rhs);
     if (ldlt_saddle_.info() != Eigen::Success) return false;
     for (int it = 0; it < config_.saddle_refinement_steps; ++it) {
@@ -289,6 +304,7 @@ double GaussNewtonSolver::minimize(const casadi::DM& params, Eigen::VectorXd& x,
     // Leaves x_buf holding x_eval, so the Jacobian can be taken at the same point.
     auto residual_at = [&](const Eigen::VectorXd& x_eval, Eigen::VectorXd& r_out) -> double {
         std::copy(x_eval.data(), x_eval.data() + n_x, x_buf.begin());
+        ScopedTimer timer(eval_seconds_);
         casadi::DM r = residual_func_(std::vector<casadi::DM>{x_dm_, params})[0];
         r_out = Eigen::Map<const Eigen::VectorXd>(r.ptr(), r.numel());
         return r_out.squaredNorm();
@@ -297,6 +313,7 @@ double GaussNewtonSolver::minimize(const casadi::DM& params, Eigen::VectorXd& x,
     // Refresh cached matrices from the CasADi Jacobian at x_buf: the full J_ for
     // the normal path and M_'s C/dual blocks for the saddle path.
     auto refresh_jacobian = [&]() {
+        ScopedTimer timer(eval_seconds_);
         const casadi::DM J_casadi = jacobian_func_(std::vector<casadi::DM>{x_dm_, params})[0];
         updateJacobianValues(J_casadi);
         if (use_saddle_) updateSaddleValues(J_casadi, p);
@@ -312,6 +329,7 @@ double GaussNewtonSolver::minimize(const casadi::DM& params, Eigen::VectorXd& x,
     Eigen::VectorXd r_trial;
 
     // X-update failure tracking for reporting; it does not change control flow.
+    last_iterations_ = 0;
     last_x_update_failed_ = false;
     bool had_la_failure = false;  // some LM attempt's factorisation reported info != Success
     bool any_accept = false;      // at least one LM step was accepted this call
@@ -387,7 +405,7 @@ double GaussNewtonSolver::minimize(const casadi::DM& params, Eigen::VectorXd& x,
                     for (int k = 0; k < n_x; ++k) H.coeffRef(k, k) += d_lambda;
                     lambda_in_H = lambda;
                 }
-                ldlt_.factorize(H);
+                { ScopedTimer timer(factor_seconds_); ldlt_.factorize(H); }
                 if (ldlt_.info() != Eigen::Success) {
                     had_la_failure = true;
                     la_failed_this_iter = true;
@@ -396,7 +414,11 @@ double GaussNewtonSolver::minimize(const casadi::DM& params, Eigen::VectorXd& x,
                     continue;
                 }
 
-                const Eigen::VectorXd dx = ldlt_.solve(-grad);
+                Eigen::VectorXd dx;
+                {
+                    ScopedTimer solve_timer(factor_seconds_);
+                    dx = ldlt_.solve(-grad);
+                }
                 const Eigen::VectorXd x_new = x + dx;
                 const double f_new = residual_at(x_new, r_trial);  // x_buf now holds x_new
 
@@ -451,6 +473,7 @@ double GaussNewtonSolver::minimize(const casadi::DM& params, Eigen::VectorXd& x,
             }
         }
 
+        if (accepted) ++last_iterations_;
         any_accept |= accepted;
         if (!accepted) break;  // No descent even along -grad (e.g. non-finite Jacobian).
         if (step_norm < config_.step_tol) break;

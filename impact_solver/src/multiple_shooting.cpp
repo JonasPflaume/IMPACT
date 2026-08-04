@@ -15,7 +15,7 @@ using casadi::SX;
 // constraints, the initial condition is a separate equality block, and the whole
 // stacked problem is handed to buildMPCC().
 MultipleShootingLayout buildMultipleShooting(const StageProblem& stage,
-                                             const BCDAULAConfig& config) {
+                                             const AulaConfig& config) {
     const int nx = stage.stateDim();
     const int nu = stage.controlDim();
     const int nc = stage.compDim();
@@ -99,7 +99,7 @@ MultipleShootingLayout buildMultipleShooting(const StageProblem& stage,
 
 // Front-end wrapper.
 
-MultipleShootingSolution MultipleShootingSolver::solve(const BCDAULAConfig& config) {
+MultipleShootingSolution MultipleShootingSolver::solve(const AulaConfig& config) {
     const int nx = problem_->getStateDim();
     const int nu = problem_->getControlDim();
     Eigen::MatrixXd x_init(nx, config.horizon + 1);
@@ -116,7 +116,7 @@ MultipleShootingSolution MultipleShootingSolver::solve(const BCDAULAConfig& conf
 }
 
 MultipleShootingSolution MultipleShootingSolver::solveWithInitialGuess(
-    const BCDAULAConfig& config, const Eigen::MatrixXd& x_init, const Eigen::MatrixXd& u_init) {
+    const AulaConfig& config, const Eigen::MatrixXd& x_init, const Eigen::MatrixXd& u_init) {
     const int nx = problem_->getStateDim();
     const int nu = problem_->getControlDim();
     const int horizon = config.horizon;
@@ -135,8 +135,8 @@ MultipleShootingSolution MultipleShootingSolver::solveWithInitialGuess(
     for (int k = 0; k <= horizon; ++k) z.segment(k * nx, nx) = x_init.col(k);
     for (int k = 0; k < horizon; ++k) z.segment(nx_total + k * nu, nu) = u_init.col(k);
 
-    BCDAULASolver solver;
-    BCDAULAResult r = solver.solve(sub, config, z);
+    AulaSolver solver;
+    AulaResult r = solver.solve(sub, config, z);
 
     MultipleShootingSolution sol;
     sol.state_trajectory.resize(nx, horizon + 1);
@@ -150,9 +150,15 @@ MultipleShootingSolution MultipleShootingSolver::solveWithInitialGuess(
     sol.equality_violation = r.equality_violation;
     sol.inequality_violation = r.inequality_violation;
     sol.complementarity_violation = r.complementarity_violation;
+    sol.stationarity_violation = r.stationarity_violation;
+    sol.comp_neg_G = r.comp_neg_G;
+    sol.comp_neg_H = r.comp_neg_H;
+    sol.comp_support_G = r.comp_support_G;
+    sol.comp_support_H = r.comp_support_H;
     sol.converged = r.converged;
     sol.outer_iterations = r.outer_iterations;
     sol.total_inner_iterations = r.total_inner_iterations;
+    sol.total_gn_iterations = r.total_gn_iterations;
     sol.solve_time = r.solve_time;
     sol.status_message = r.status_message;
     return sol;

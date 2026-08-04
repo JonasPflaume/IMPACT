@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Docker entry point: solve Push-T with IMPACT's Python bindings, then render the
+# trajectory it found.
 set -euo pipefail
 
 cd /workspace/impact
@@ -6,66 +8,49 @@ cd /workspace/impact
 usage() {
     cat <<'EOF'
 IMPACT Docker commands:
-  box [args...]       Run the box-pushing CITO example.
-  push_t [args...]    Run the Push-T CITO example.
-  cart [args...]      Run the cart-transporter CITO example.
-  all                 Run all three CITO examples with default arguments.
-  toy_mpcc            Run the smallest generic MPCC example.
+  push_t [args...]    Solve Push-T and render the resulting trajectory (default).
+  run <task> [args]   Run any registered task; see `run list`.
+  python [args...]    Start Python with the `impact` bindings importable.
   bash                Open an interactive shell in the image.
 
-Default arguments:
-  box      0 0 0  1 1 0
-  push_t   0 0 0  0 0 1
-  cart     0 0 0 0  1.5 1 0 0
+The default run is:
+  python -m examples.run push_t --start 0 0 0 --goal 0.05 0.05 1.5708 --visualize
 
-Mount results out of the container with:
-  docker run --rm -v "$PWD/results:/workspace/impact/results" impact box
+Results land in /workspace/impact/results. Mount them out with:
+  docker run --rm -v "$PWD/results:/workspace/impact/results" impact
 EOF
 }
 
-run_box() {
-    if [ "$#" -eq 0 ]; then
-        set -- 0 0 0 1 1 0
-    fi
-    ./build/experiments/box/box_impact_multiple "$@"
-}
+# `examples` is reached through the impact_examples.pth the image writes into
+# site-packages, NOT through PYTHONPATH. PYTHONPATH is placed ahead of
+# site-packages, and /workspace/impact/python also holds the extension-less
+# *source* copy of `impact`, so exporting it here would shadow the installed
+# solver and every command below would fail to import `_impact_core`.
+export MPLBACKEND="${MPLBACKEND:-Agg}"
 
 run_push_t() {
     if [ "$#" -eq 0 ]; then
-        set -- 0 0 0 0 0 1
+        set -- --start 0 0 0 --goal 0.05 0.05 1.5708
     fi
-    ./build/experiments/push_t/push_t_impact_multiple "$@"
+    micromamba run -n base python -m examples.run push_t "$@" --visualize
+    echo
+    echo "Rendered files are under results/push_t/."
 }
 
-run_cart() {
-    if [ "$#" -eq 0 ]; then
-        set -- 0 0 0 0 1.5 1 0 0
-    fi
-    ./build/experiments/cart_transporter/cart_transporter_impact_multiple "$@"
-}
-
-cmd="${1:-box}"
+cmd="${1:-push_t}"
 if [ "$#" -gt 0 ]; then
     shift
 fi
 
 case "$cmd" in
-    box)
-        run_box "$@"
-        ;;
     push_t|pusht|push-t)
         run_push_t "$@"
         ;;
-    cart|cart_transporter|cart-transporter)
-        run_cart "$@"
+    run)
+        micromamba run -n base python -m examples.run "$@"
         ;;
-    all)
-        run_box
-        run_push_t
-        run_cart
-        ;;
-    toy_mpcc|toy)
-        ./build/experiments/toy_mpcc/toy_mpcc "$@"
+    python)
+        exec micromamba run -n base python "$@"
         ;;
     bash|shell)
         exec /bin/bash "$@"

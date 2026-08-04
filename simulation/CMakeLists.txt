@@ -21,7 +21,7 @@ target_link_libraries(mujoco_simulation_lib
         mujoco::mujoco
         Eigen3::Eigen
         glfw
-        casadi
+        ${IMPACT_CASADI_TARGET}
 )
 
 add_executable(mujoco_viewer
@@ -32,7 +32,7 @@ target_link_libraries(mujoco_viewer
     PRIVATE
         mujoco_simulation_lib
         glfw
-        casadi
+        ${IMPACT_CASADI_TARGET}
 )
 
 target_include_directories(mujoco_viewer PRIVATE

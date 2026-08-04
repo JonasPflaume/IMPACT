@@ -9,12 +9,13 @@
 
 #include "impact/multiple_shooting.h"
 #include "box_pushing.h"
+#include "impact_cli.h"
 
 bool parseArgs(int argc, char* argv[], Eigen::VectorXd& x0, Eigen::VectorXd& x_goal,
-               std::string& output_file) {
+               std::string& output_file, impact_cli::Options& opt) {
     if (argc < 7) {
-        std::cerr << "Usage: " << argv[0]
-                  << " x0_px x0_py x0_theta goal_px goal_py goal_theta [output_file]\n";
+        impact_cli::printUsage(argv[0],
+                               "x0_px x0_py x0_theta goal_px goal_py goal_theta");
         return false;
     }
     x0 = Eigen::VectorXd::Zero(3);
@@ -22,8 +23,10 @@ bool parseArgs(int argc, char* argv[], Eigen::VectorXd& x0, Eigen::VectorXd& x_g
     for (int i = 0; i < 3; ++i) x0(i) = std::atof(argv[1 + i]);
     for (int i = 0; i < 3; ++i) x_goal(i) = std::atof(argv[4 + i]);
 
-    if (argc >= 8) {
+    int argi = 7;
+    if (argc >= 8 && argv[7][0] != '-') {
         output_file = argv[7];
+        argi = 8;
     } else {
         auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::system_clock::now().time_since_epoch())
@@ -32,12 +35,12 @@ bool parseArgs(int argc, char* argv[], Eigen::VectorXd& x0, Eigen::VectorXd& x_g
         oss << "results/box/bcd_aula/trajectory_" << ts << ".txt";
         output_file = oss.str();
     }
-    return true;
+    return impact_cli::parseFlags(argc, argv, argi, opt);
 }
 
 void saveSolutionToFile(const impact::MultipleShootingSolution& solution, const Eigen::VectorXd& x0,
                         const Eigen::VectorXd& x_goal, int iterations, double solve_time,
-                        const std::string& filename) {
+                        const std::string& filename, const std::string& planner) {
     std::filesystem::path out_path(filename);
     if (out_path.has_parent_path()) {
         std::error_code ec;
@@ -49,7 +52,8 @@ void saveSolutionToFile(const impact::MultipleShootingSolution& solution, const 
         return;
     }
     file << std::fixed << std::setprecision(10);
-    file << "# Box Pushing BCD-AULA Trajectory\n# Planner: bcd_aula\n# Task: box\n\n";
+    file << "# Box Pushing BCD-AULA Trajectory\n# Planner: " << planner
+         << "\n# Task: box\n\n";
     file << "# Start State (px, py, theta)\n";
     for (int i = 0; i < x0.rows(); ++i) file << x0(i) << (i < x0.rows() - 1 ? " " : "");
     file << "\n\n# Goal State (px, py, theta)\n";
@@ -79,11 +83,12 @@ int main(int argc, char* argv[]) {
 
     Eigen::VectorXd x0, x_goal;
     std::string output_file;
-    if (!parseArgs(argc, argv, x0, x_goal, output_file)) return 1;
+    impact_cli::Options opt;
+    if (!parseArgs(argc, argv, x0, x_goal, output_file, opt)) return 1;
 
     auto box_problem = std::make_shared<box_pushing::BoxPushing>();
 
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = 50;
     config.x_0 = x0;
     config.x_goal = x_goal;
@@ -112,12 +117,18 @@ int main(int argc, char* argv[]) {
     config.newton_max_iter = 50;
     config.newton_tol = 1e-6;
     config.newton_regularization = 2e-5;
-    config.use_saddle = true;
 
     config.print_level = 1;
 
+    impact_cli::apply(opt, config);
+    const std::string planner = impact_cli::plannerTag(opt, "bcd_aula");
+    impact_cli::printSettings(opt, config);
+
     impact::MultipleShootingSolver solver(box_problem);
     impact::MultipleShootingSolution solution = solver.solve(config);
+
+    const Eigen::VectorXd x_final = solution.state_trajectory.col(config.horizon);
+    const double goal_err = (x_final - config.x_goal).lpNorm<Eigen::Infinity>();
 
     std::cout << "\n=== Solution Summary ===" << std::endl;
     std::cout << "Converged: " << (solution.converged ? "YES" : "NO") << std::endl;
@@ -129,9 +140,11 @@ int main(int argc, char* argv[]) {
               << "]" << std::endl;
     std::cout << "Goal state:  [" << config.x_goal.transpose() << "]" << std::endl;
     std::cout << "Complementarity violation: " << solution.complementarity_violation << std::endl;
+    std::cout << "Total GN iterations: " << solution.total_gn_iterations << std::endl;
+    impact_cli::printResultLine(planner, solution, goal_err);
 
     saveSolutionToFile(solution, config.x_0, config.x_goal, solution.total_inner_iterations,
-                       solution.solve_time, output_file);
+                       solution.solve_time, output_file, planner);
     std::cout << "\n=== Optimization Complete ===" << std::endl;
     return 0;
 }

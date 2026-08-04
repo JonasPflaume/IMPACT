@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "box_pushing.h"
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_solver.h"
 #include "impact/lcp_stage.h"
 #include "impact/mpcc_stage.h"
 #include "impact/mpcc_subproblem.h"
@@ -30,7 +30,7 @@ void check(bool ok, const std::string& msg) {
 // MPCC task (box) via single shooting.
 static void boxSingleShooting() {
     auto problem = std::make_shared<box_pushing::BoxPushing>();
-    impact::BCDAULAConfig c;
+    impact::AulaConfig c;
     c.horizon = 50;
     c.x_0 = Eigen::VectorXd::Zero(3);
     c.x_goal = (Eigen::VectorXd(3) << 0.1, 0.1, 1.0).finished();
@@ -46,7 +46,6 @@ static void boxSingleShooting() {
     c.max_inner_iters = 50;
     c.newton_max_iter = 100;
     c.newton_regularization = 2e-5;
-    c.use_saddle = true;
     c.print_level = 0;
 
     impact::MPCCStage stage(problem, c);
@@ -59,8 +58,8 @@ static void boxSingleShooting() {
     const int nu = problem->getControlDim();
     Eigen::VectorXd z = Eigen::VectorXd::Zero(sub.numOpt());
 
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(sub, c, z);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(sub, c, z);
 
     // Roll the state out to read the achieved terminal state.
     Eigen::VectorXd x = c.x_0;
@@ -83,7 +82,7 @@ static void boxSingleShooting() {
 // LCP task (allegro) via multiple shooting.
 static void allegroMultipleShooting() {
     auto problem = std::make_shared<allegro_lcp::AllegroLCPProblem>();
-    impact::BCDAULAConfig c;
+    impact::AulaConfig c;
     c.horizon = 4;
     c.dynamics_scale = 25.0;
     c.comp_scale = 1.0;
@@ -95,7 +94,6 @@ static void allegroMultipleShooting() {
     c.outer_tol_comp = 1e-3;
     c.outer_tol_g = 1e-3;
     c.newton_max_iter = 20;
-    c.use_saddle = true;
     c.use_cmd_bounds = true;
     c.cmd_lower = Eigen::VectorXd::Constant(16, -0.1);
     c.cmd_upper = Eigen::VectorXd::Constant(16, 0.1);
@@ -127,8 +125,8 @@ static void allegroMultipleShooting() {
     Eigen::VectorXd z = Eigen::VectorXd::Zero(sub.numOpt());
     for (int k = 0; k <= c.horizon; ++k) z.segment(k * nx, nx) = q0;
 
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(sub, c, z);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(sub, c, z);
     std::cout << "  allegro multiple-shooting: outer=" << r.outer_iterations
               << " obj=" << r.objective_value << " dyn=" << r.dynamics_violation
               << " comp=" << r.complementarity_violation << "\n";
@@ -151,7 +149,7 @@ static void genericMPCC() {
     desc.addComplementarityBlock("comp", z(0), z(1), {1.0, 1.0, 1e-8});
 
     impact::MPCCSubproblem m = impact::buildMPCC(desc);
-    impact::BCDAULAConfig c;
+    impact::AulaConfig c;
     c.max_outer_iters = 300;
     c.max_inner_iters = 50;
     c.rho_scale = 1.5;
@@ -159,13 +157,12 @@ static void genericMPCC() {
     c.outer_tol_h = 1e-7;
     c.outer_tol_comp = 1e-7;
     c.newton_max_iter = 50;
-    c.use_saddle = true;
     c.print_level = 0;
 
     Eigen::VectorXd z0(2);
     z0 << 0.5, 0.5;
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(*m.sub, c, z0);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(*m.sub, c, z0);
     const double comp = std::abs(r.z(0) * r.z(1));
     std::cout << "  generic MPCC  min||z-1||^2 s.t. 0<=z1 perp z2>=0:  z=[" << r.z.transpose()
               << "] obj=" << r.objective_value << " |z1*z2|=" << comp << "\n";
@@ -174,7 +171,7 @@ static void genericMPCC() {
 }
 
 // Same generic MPCC through the classical use_saddle=false backend.
-// Guards the normal-equations Gauss-Newton path end-to-end through BCDAULASolver:
+// Guards the normal-equations Gauss-Newton path end-to-end through AulaSolver:
 // every other full-solver test uses the saddle backend, so without this the
 // opt-out default path could regress unnoticed.
 static void genericMPCCNoSaddle() {
@@ -188,7 +185,7 @@ static void genericMPCCNoSaddle() {
     desc.addComplementarityBlock("comp", z(0), z(1), {1.0, 1.0, 1e-8});
 
     impact::MPCCSubproblem m = impact::buildMPCC(desc);
-    impact::BCDAULAConfig c;
+    impact::AulaConfig c;
     c.max_outer_iters = 300;
     c.max_inner_iters = 50;
     c.rho_scale = 1.5;
@@ -201,8 +198,8 @@ static void genericMPCCNoSaddle() {
 
     Eigen::VectorXd z0(2);
     z0 << 0.5, 0.5;
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(*m.sub, c, z0);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(*m.sub, c, z0);
     const double comp = std::abs(r.z(0) * r.z(1));
     std::cout << "  generic MPCC (no-saddle backend):  z=[" << r.z.transpose()
               << "] obj=" << r.objective_value << " |z1*z2|=" << comp
@@ -228,7 +225,7 @@ static void genericMPCCMultiComp() {
     desc.addComplementarityBlock("axis_b", z(2), z(3), {0.75, 2.0, 1e-8});
 
     impact::MPCCSubproblem m = impact::buildMPCC(desc);
-    impact::BCDAULAConfig c;
+    impact::AulaConfig c;
     c.max_outer_iters = 300;
     c.max_inner_iters = 50;
     c.rho_scale = 1.5;
@@ -236,12 +233,11 @@ static void genericMPCCMultiComp() {
     c.outer_tol_h = 1e-7;
     c.outer_tol_comp = 1e-7;
     c.newton_max_iter = 50;
-    c.use_saddle = true;
     c.print_level = 0;
 
     Eigen::VectorXd z0 = Eigen::VectorXd::Zero(4);
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(*m.sub, c, z0);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(*m.sub, c, z0);
     const double comp0 = std::abs(r.z(0) * r.z(1));
     const double comp1 = std::abs(r.z(2) * r.z(3));
     std::cout << "  generic MPCC (two comp groups): z=[" << r.z.transpose()

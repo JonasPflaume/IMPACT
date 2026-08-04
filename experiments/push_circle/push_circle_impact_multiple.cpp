@@ -10,6 +10,7 @@
 #include <sstream>
 
 #include "impact/multiple_shooting.h"
+#include "impact_cli.h"
 #include "push_circle.h"
 
 // Scenario: a disk starts at the origin; the pusher starts far to the lower-left
@@ -31,10 +32,17 @@ int main(int argc, char* argv[]) {
     std::cout << "=== Disk Pushing MPCC with BCD-AuLa (IMPACT) — MULTIPLE SHOOTING ===" << std::endl;
 
     Scenario sc;
-    if (argc >= 2) sc.D = std::atof(argv[1]);
-    if (argc >= 3) sc.angle_deg = std::atof(argv[2]);
-    if (argc >= 4) sc.horizon = std::atoi(argv[3]);
-    if (argc >= 5) {
+    impact_cli::Options cli;
+    // Positionals stop at the first --flag, so any invocation can grow a flag tail.
+    const int n_pos = impact_cli::firstFlagIndex(argc, argv);
+    if (!impact_cli::parseFlags(argc, argv, n_pos, cli)) {
+        impact_cli::printUsage(argv[0], "D angle_deg [horizon]");
+        return 1;
+    }
+    if (n_pos >= 2) sc.D = std::atof(argv[1]);
+    if (n_pos >= 3) sc.angle_deg = std::atof(argv[2]);
+    if (n_pos >= 4) sc.horizon = std::atoi(argv[3]);
+    if (n_pos >= 5) {
         sc.output_file = argv[4];
     } else {
         auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -84,7 +92,7 @@ int main(int argc, char* argv[]) {
     std::cout << "x0    = [" << x0.transpose() << "]\n";
     std::cout << "goal  = [" << x_goal.transpose() << "]\n";
 
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = sc.horizon;
     config.x_0 = x0;
     config.x_goal = x_goal;
@@ -121,6 +129,11 @@ int main(int argc, char* argv[]) {
 
     config.print_level = 1;
 
+    // Trailing flags override the tuned defaults above; an invocation without
+    // any flag is unchanged.
+    impact_cli::apply(cli, config);
+    impact_cli::printSettings(cli, config);
+
     impact::MultipleShootingSolver solver(problem);
     impact::MultipleShootingSolution solution = solver.solve(config);
 
@@ -134,6 +147,13 @@ int main(int argc, char* argv[]) {
               << "]" << std::endl;
     std::cout << "Goal disk:   [" << x_goal.head(2).transpose() << "]" << std::endl;
     std::cout << "Complementarity violation: " << solution.complementarity_violation << std::endl;
+    std::cout << "Total GN iterations: " << solution.total_gn_iterations << std::endl;
+    // Goal error is the disk error: the pusher's terminal target is a placement
+    // convention, not part of the task.
+    impact_cli::printResultLine(
+        "bcd_aula", solution,
+        (solution.state_trajectory.col(sc.horizon).head(2) - x_goal.head(2))
+            .lpNorm<Eigen::Infinity>());
 
     // Write the trajectory.
     std::filesystem::path out_path(sc.output_file);

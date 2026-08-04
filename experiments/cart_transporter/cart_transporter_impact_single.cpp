@@ -16,15 +16,18 @@
 #include <iostream>
 #include <memory>
 
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_solver.h"
 #include "impact/mpcc_stage.h"
 #include "impact/single_shooting.h"
+#include "impact_cli.h"
 #include "cart_transporter.h"
 
 int main(int argc, char* argv[]) {
     std::cout << "=== Cart Transporter MPCC with BCD-AuLa (IMPACT) — SINGLE SHOOTING ===" << std::endl;
-    if (argc < 9) {
-        std::cerr << "Usage: " << argv[0] << " x1 x2 x1d x2d  gx1 gx2 gx1d gx2d\n";
+    impact_cli::Options cli;
+    const int n_pos = impact_cli::firstFlagIndex(argc, argv);
+    if (n_pos < 9 || !impact_cli::parseFlags(argc, argv, n_pos, cli)) {
+        impact_cli::printUsage(argv[0], "x1 x2 x1d x2d  gx1 gx2 gx1d gx2d");
         return 1;
     }
     Eigen::VectorXd x0(4), x_goal(4);
@@ -36,7 +39,7 @@ int main(int argc, char* argv[]) {
     auto problem = std::make_shared<cart_transporter::CartTransporter>();
 
     // Same settings as the multiple-shooting driver.
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = 300;
     config.x_0 = x0;
     config.x_goal = x_goal;
@@ -60,8 +63,11 @@ int main(int argc, char* argv[]) {
     config.newton_max_iter = 100;
     config.newton_tol = 1e-6;
     config.newton_regularization = 1e-5;
-    config.use_saddle = true;
     config.print_level = 1;
+
+    impact_cli::apply(cli, config);
+    const std::string planner = impact_cli::plannerTag(cli, "bcd_aula");
+    impact_cli::printSettings(cli, config);
 
     impact::MPCCStage stage(problem, config);
     impact::SingleShootingLayout layout = impact::buildSingleShooting(stage, config);
@@ -71,8 +77,8 @@ int main(int argc, char* argv[]) {
 
     Eigen::VectorXd z = Eigen::VectorXd::Zero(sub.numOpt());
 
-    impact::BCDAULASolver solver;
-    impact::BCDAULAResult r = solver.solve(sub, config, z);
+    impact::AulaSolver solver;
+    impact::AulaResult r = solver.solve(sub, config, z);
 
     const int nx = problem->getStateDim();
     const int nu = problem->getControlDim();
@@ -98,5 +104,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Final state: [" << x.transpose() << "]" << std::endl;
     std::cout << "Goal state:  [" << x_goal.transpose() << "]" << std::endl;
     std::cout << "Complementarity violation: " << r.complementarity_violation << std::endl;
+    std::cout << "Total GN iterations: " << r.total_gn_iterations << std::endl;
+    impact_cli::printResultLine(planner, r, (x - x_goal).lpNorm<Eigen::Infinity>());
     return 0;
 }

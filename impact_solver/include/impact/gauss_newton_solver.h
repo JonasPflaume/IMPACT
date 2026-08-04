@@ -88,7 +88,25 @@ class GaussNewtonSolver {
     /// solver distinguish a linear-algebra breakdown from slow convergence.
     bool lastXUpdateFailed() const { return last_x_update_failed_; }
 
+    /// Accepted steps taken by the most recent minimize() call. This is the unit of
+    /// X-update work (each accepted step costs one Jacobian factorisation plus the
+    /// rejected trials that preceded it). Reset at the start of every minimize().
+    int lastIterations() const { return last_iterations_; }
+
+    /// Wall time spent in the two things an X-step actually does: evaluating the
+    /// CasADi functions, and factorizing/solving the linear system. Accumulated
+    /// across every minimize() since the last resetTimers(), because the question
+    /// they answer -- whether a faster linear-algebra backend is worth pursuing --
+    /// is about the whole solve, not one step. Two steady_clock reads per call
+    /// site is ~50 ns against calls that cost tens of microseconds.
+    double evalSeconds() const { return eval_seconds_; }
+    double factorSeconds() const { return factor_seconds_; }
+    void resetTimers() { eval_seconds_ = factor_seconds_ = 0.0; }
+
    private:
+    double eval_seconds_ = 0.0;
+    double factor_seconds_ = 0.0;
+    int last_iterations_ = 0;
     bool last_x_update_failed_ = false;
     // True once init() has built the structural caches; enables the same-structure
     // fast path on repeated init() calls (persistent-subproblem MPC solves).

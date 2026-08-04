@@ -409,7 +409,7 @@ int main(int argc, char* argv[]) {
     impact::SingleShootingSolver solver(problem);
 
     // Configure the solver from the selected parameter set.
-    impact::BCDAULAConfig config;
+    impact::AulaConfig config;
     config.horizon = obj_params.horizon;
     config.rho_dynamics_init = obj_params.rho_dynamics_init;
     config.rho_comp_init = obj_params.rho_comp_init;
@@ -425,8 +425,8 @@ int main(int argc, char* argv[]) {
     config.max_inner_iters = obj_params.max_inner_iters;
     config.newton_max_iter = obj_params.newton_max_iter;
     config.newton_step_tol = obj_params.newton_step_tol;
-    config.newton_tol = 1e-5;             // legacy LCPBCDAULAConfig default
-    config.newton_regularization = 1e-6;  // legacy LCPBCDAULAConfig default
+    config.newton_tol = 1e-5;             // legacy LCPAulaConfig default
+    config.newton_regularization = 1e-6;  // legacy LCPAulaConfig default
     config.print_level = 0;  // 0=quiet, 1=outer iter, 2=detailed
 
     // Control bounds via the Augmented Lagrangian inequality channel.

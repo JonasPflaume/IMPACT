@@ -21,7 +21,7 @@ target_link_libraries(relaxation_solver
     PUBLIC
         impact
         Eigen3::Eigen
-        casadi
+        ${IMPACT_CASADI_TARGET}
 )
 
 target_compile_features(relaxation_solver PUBLIC cxx_std_17)

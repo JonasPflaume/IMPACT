@@ -16,7 +16,7 @@ namespace impact {
  *   - multiple shooting makes the state X free and adds the defect
  *     X_{k+1} - step(X_k, U_k) as an equality block;
  *   - single shooting rolls X out via step() so only the controls are free.
- * Both builders emit an AulaSubproblem for BCDAULASolver.
+ * Both builders emit an AulaSubproblem for AulaSolver.
  *
  * Symbolic methods are evaluated when the subproblem is built, not during the
  * solver loop. The runtime parameter vector p is for data that changes between

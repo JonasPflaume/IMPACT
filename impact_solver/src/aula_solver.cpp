@@ -1,4 +1,4 @@
-#include "impact/bcd_aula_solver.h"
+#include "impact/aula_solver.h"
 
 #include <algorithm>
 #include <chrono>
@@ -35,18 +35,21 @@ int totalCompDim(const std::vector<CompBlock>& comps) {
 
 }  // namespace
 
-BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& config,
+AulaResult AulaSolver::solve(AulaSubproblem& sub, const AulaConfig& config,
                                    const Eigen::VectorXd& z_init) {
-    const auto t_start = std::chrono::high_resolution_clock::now();
+    // steady_clock, not high_resolution_clock: libstdc++ aliases the latter to
+    // system_clock, which is not monotonic, so an NTP step mid-solve can make the
+    // reported solve_time jump or go negative.
+    const auto t_start = std::chrono::steady_clock::now();
 
     if (z_init.size() != sub.numOpt() || !z_init.allFinite())
-        throw std::invalid_argument("BCDAULASolver::solve: invalid initial decision vector");
+        throw std::invalid_argument("AulaSolver::solve: invalid initial decision vector");
     if (config.max_outer_iters <= 0 || config.max_inner_iters <= 0 ||
         config.newton_max_iter <= 0)
-        throw std::invalid_argument("BCDAULASolver::solve: iteration limits must be positive");
+        throw std::invalid_argument("AulaSolver::solve: iteration limits must be positive");
     if (!(config.rho_scale > 1.0) || !(config.rho_max > 0.0) ||
         !(config.penalty_decrease_ratio >= 0.0 && config.penalty_decrease_ratio <= 1.0))
-        throw std::invalid_argument("BCDAULASolver::solve: invalid penalty configuration");
+        throw std::invalid_argument("AulaSolver::solve: invalid penalty configuration");
 
     // Bind the Gauss-Newton X-solver to this subproblem.
     GaussNewtonConfig gn_cfg;
@@ -54,6 +57,9 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     gn_cfg.grad_tol = config.newton_tol;
     gn_cfg.step_tol = config.newton_step_tol;
     gn_cfg.lambda_init = config.newton_regularization;
+    gn_cfg.lambda_min = config.newton_lambda_min;
+    gn_cfg.lambda_max = config.newton_lambda_max;
+    gn_cfg.max_damping_tries = config.newton_max_damping_tries;
     gn_cfg.print_level = (config.print_level >= 3) ? 1 : 0;
     gn_cfg.use_saddle = config.use_saddle;
     gn_cfg.sigma_primal = config.saddle_sigma_primal;
@@ -62,6 +68,9 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     const SaddleLayout layout = sub.saddleLayout();
     gn_.init(sub.residualFunction(), sub.jacobianFunction(), gn_cfg,
              config.use_saddle ? &layout : nullptr);
+    // The solver instance is reused across MPC steps, so the timers have to be
+    // zeroed per solve rather than per construction.
+    gn_.resetTimers();
 
     Eigen::VectorXd z = z_init;
 
@@ -81,6 +90,88 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
 
     Eigen::VectorXd G(n_comp), H(n_comp);
 
+    // Balanced initial penalties (Birgin-Martinez): pick each block's rho_0 so that
+    // at z_init the penalty term rho * ||c||^2 matches the objective's magnitude,
+    // instead of trusting the build-time rho_*_init seeds. The balance is only
+    // informative when the block starts measurably infeasible (||c||^2 > 1); a
+    // (near-)feasible block carries no scale information at z_init, so it starts at
+    // the geometric midpoint of the clip window (the scale-free neutral choice) and
+    // is balanced later, at the first outer iteration that gives it a measurable
+    // residual -- see the deferred pass at the end of the outer loop. Without that
+    // split, a feasible cold start (e.g. constant-state init) drives the guarded
+    // formula 2 max(1,|f|) / max(1, ||c||^2) to the clip ceiling, and a penalty
+    // that stiff freezes the first subproblems onto the feasible manifold before
+    // the objective has moved anywhere. rho_init is overwritten alongside rho, so
+    // stagnation restarts reset to the same balanced value.
+    std::vector<char> rho_balanced;       // empty unless auto_rho_init
+    std::vector<char> rho_comp_balanced;  // empty unless auto_rho_init
+    // Everything below is in EFFECTIVE-stiffness units. The penalty a block exerts
+    // goes as rho * scale^2 (its rows are sqrt(rho) * scale * c), so a nominal-rho
+    // clip window silently under-enforces any block with scale << 1: at
+    // comp_scale = 0.005 a nominal ceiling of 1e2 is an effective ceiling of
+    // 2.5e-3, the complementarity set stays relaxed forever, and the optimizer
+    // exploits it with mode-averaged chattering plans. Balancing, clipping and
+    // capping rho_eff = rho * scale^2 makes the whole scheme invariant under the
+    // conditioning scales, which then do the only job they should: scaling rows.
+    auto sq = [](double s) { return s > 0.0 ? s * s : 1.0; };
+    auto balancedRhoEff = [&](double d2u, double f_abs) {
+        return std::clamp(2.0 * std::max(1.0, f_abs) / d2u, config.auto_rho_clip_min,
+                          config.auto_rho_clip_max);
+    };
+    // Unscaled squared norm of a comp block's split residual at the current slacks;
+    // at kappa = 0, sG/sH from the closed-form projection make this exactly the
+    // squared distance of (G, H) to the complementarity set.
+    auto compResidual2 = [](const CompBlock& comp, const Eigen::VectorXd& Gv,
+                            const Eigen::VectorXd& Hv, int off) {
+        double d2 = 0.0;
+        for (int i = 0; i < comp.dim; ++i) {
+            const double rg = Gv(off + i) - comp.sG(i);
+            const double rh = Hv(off + i) - comp.sH(i);
+            d2 += rg * rg + rh * rh;
+        }
+        return d2;
+    };
+    if (config.auto_rho_init) {
+        const double f0 = std::abs(sub.evalTaskObjective(z));
+        rho_balanced.assign(blocks.size(), 1);
+        rho_comp_balanced.assign(comps.size(), 1);
+        for (size_t i = 0; i < blocks.size(); ++i) {
+            DualBlock& b = blocks[i];
+            if (b.dim == 0) continue;
+            Eigen::VectorXd c = b.eval_scaled(z);
+            if (b.kind == DualKind::Inequality) c = c.cwiseMax(0.0);
+            const double d2u = c.squaredNorm() / sq(b.scale);  // unscaled units
+            rho_balanced[i] = d2u > 1.0;
+            // A block below the unit residual carries no scale information; the
+            // build-time seed is the only prior there is, and it holds exactly
+            // until the deferred pass below sees a measurable residual.
+            b.rho = rho_balanced[i] ? balancedRhoEff(d2u, f0) / sq(b.scale) : b.rho_init;
+        }
+        if (n_comp > 0) {
+            sub.evalGH(z, G, H);
+            int off = 0;
+            for (size_t ci = 0; ci < comps.size(); ++ci) {
+                CompBlock& comp = comps[ci];
+                if (comp.dim <= 0) continue;
+                // Distance^2 of (G, H) to the complementarity set, per pair the
+                // smaller branch cost from projectComplementarity. Needs no rho,
+                // which breaks the projection -> rho_0 -> projection cycle.
+                double d2u = 0.0;
+                for (int i = 0; i < comp.dim; ++i) {
+                    const double aG = G(off + i);
+                    const double aH = H(off + i);
+                    const double nG = std::min(aG, 0.0), nH = std::min(aH, 0.0);
+                    d2u += std::min(nG * nG + aH * aH, aG * aG + nH * nH);
+                }
+                rho_comp_balanced[ci] = d2u > 1.0;
+                comp.rho = rho_comp_balanced[ci]
+                               ? balancedRhoEff(d2u, f0) / sq(comp.scale)
+                               : comp.rho_init;
+                off += comp.dim;
+            }
+        }
+    }
+
     if (config.print_level >= 1) {
         std::cout << std::string(60, '=') << "\nBCD-AuLa (IMPACT) Solver\n"
                   << std::string(60, '=') << "\nVariables: " << sub.numOpt()
@@ -98,6 +189,7 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     int stagnation_restarts = 0;
     int outer_iter = 0;
     int total_inner = 0;
+    int total_gn = 0;
 
     for (outer_iter = 0; outer_iter < config.max_outer_iters; ++outer_iter) {
         const Eigen::VectorXd z_outer_start = z;
@@ -116,10 +208,12 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         }
         sub.syncParams();
 
-        const double inner_tol = (outer_iter < 3) ? config.inner_tol_init
-                                 : (outer_iter < 8)
-                                     ? 0.5 * (config.inner_tol_init + config.inner_tol_final)
-                                     : config.inner_tol_final;
+        const double inner_tol =
+            (outer_iter < config.inner_tol_ramp_start)
+                ? config.inner_tol_init
+                : (outer_iter < config.inner_tol_ramp_end)
+                      ? 0.5 * (config.inner_tol_init + config.inner_tol_final)
+                      : config.inner_tol_final;
 
         // Inner BCD loop: alternate the GN X-update and the closed-form slack update.
         // The parameter buffer is synced before the loop and after every slack
@@ -134,10 +228,13 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
 
             const double gn_tol =
                 config.use_forcing_sequence
-                    ? std::min(1e-2, std::max(config.newton_tol, 0.1 * outer_viol_prev))
+                    ? std::min(config.forcing_cap,
+                               std::max(config.newton_tol,
+                                        config.forcing_factor * outer_viol_prev))
                     : -1.0;
             gn_.minimize(sub.params(), z, gn_tol);  // X-update
             any_la_failure |= gn_.lastXUpdateFailed();
+            total_gn += gn_.lastIterations();
 
             if (n_comp > 0) {
                 sub.evalGH(z, G, H);  // (Y,Z)-update
@@ -159,7 +256,6 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
                 sub.syncParams();
             }
             const double phi_S = sub.evalAugmentedObjective(z);
-
             if (std::abs(phi_prev - phi_S) < inner_tol) break;
             phi_prev = phi_S;
         }
@@ -226,11 +322,22 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
         // Update penalties from unscaled violations. The safeguard uses the same
         // units as the convergence check; otherwise a small conditioning scale can
         // leave rho unchanged while the true violation is still above tolerance.
+        // In auto mode the cap is per-block and never below the effective clip
+        // ceiling: a scale << 1 block must be allowed to reach rho_eff =
+        // auto_rho_clip_max, or rho_max (a nominal number) silently re-imposes the
+        // under-enforcement the effective-units scheme exists to remove. max()
+        // with rho_max so scale >= 1 blocks keep their configured headroom.
+        auto rhoCap = [&](double scale) {
+            return config.auto_rho_init
+                       ? std::max(config.rho_max, config.auto_rho_clip_max / sq(scale))
+                       : config.rho_max;
+        };
         for (size_t i = 0; i < blocks.size(); ++i) {
             DualBlock& b = blocks[i];
             if (b.dim == 0) continue;
             const double vu = b.scale > 0.0 ? v_scaled[i] / b.scale : v_scaled[i];
-            b.rho = safeguardedPenalty(b.rho, vu, v_prev[i], b.tol, eta, gamma, config.rho_max);
+            b.rho = safeguardedPenalty(b.rho, vu, v_prev[i], b.tol, eta, gamma,
+                                       rhoCap(b.scale));
             v_prev[i] = vu;
         }
         for (size_t ci = 0; ci < comps.size(); ++ci) {
@@ -243,8 +350,50 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
                                           : v_comp_scaled_blocks[ci]);
             comp.rho =
                 safeguardedPenalty(comp.rho, vcu, v_comp_prev[ci], comp.tol, eta, gamma,
-                                   config.rho_max);
+                                   rhoCap(comp.scale));
             v_comp_prev[ci] = vcu;
+        }
+
+        // Deferred balancing (auto_rho_init): a block that started (near-)feasible
+        // was seeded with the scale-free neutral value; the first outer iteration
+        // that hands it a measurable residual supplies the scale the balance formula
+        // needs, and the block is balanced once, here. max() keeps any safeguard
+        // growth that already happened. Costs one residual eval per still-unbalanced
+        // block per outer iteration, and nothing once every block is balanced.
+        if (config.auto_rho_init) {
+            bool pending = false;
+            for (char done : rho_balanced) pending |= !done;
+            for (char done : rho_comp_balanced) pending |= !done;
+            if (pending) {
+                const double f_cur = std::abs(sub.evalTaskObjective(z));
+                for (size_t i = 0; i < blocks.size(); ++i) {
+                    if (rho_balanced[i]) continue;
+                    DualBlock& b = blocks[i];
+                    Eigen::VectorXd c = b.eval_scaled(z);
+                    if (b.kind == DualKind::Inequality) c = c.cwiseMax(0.0);
+                    const double d2u = c.squaredNorm() / sq(b.scale);
+                    if (d2u <= 1.0) continue;
+                    b.rho = std::max(b.rho, balancedRhoEff(d2u, f_cur) / sq(b.scale));
+                    rho_balanced[i] = 1;
+                }
+                // G and H still hold their values at the current z from the last
+                // inner-loop evaluation, and sG/sH the matching projection.
+                int off = 0;
+                for (size_t ci = 0; ci < comps.size(); ++ci) {
+                    const CompBlock& c_ro = comps[ci];
+                    if (c_ro.dim <= 0) continue;
+                    if (!rho_comp_balanced[ci]) {
+                        const double d2u = compResidual2(c_ro, G, H, off);
+                        if (d2u > 1.0) {
+                            CompBlock& comp = comps[ci];
+                            comp.rho = std::max(comp.rho,
+                                                balancedRhoEff(d2u, f_cur) / sq(comp.scale));
+                            rho_comp_balanced[ci] = 1;
+                        }
+                    }
+                    off += c_ro.dim;
+                }
+            }
         }
 
         auto unscale = [](double v, double scale) { return scale > 0.0 ? v / scale : v; };
@@ -370,11 +519,12 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     }
 
     // Fill the public result fields.
-    BCDAULAResult res;
+    AulaResult res;
     res.z = z;
     res.converged = converged;
     res.outer_iterations = std::min(outer_iter + 1, config.max_outer_iters);
     res.total_inner_iterations = total_inner;
+    res.total_gn_iterations = total_gn;
     res.objective_value = sub.evalTaskObjective(z);
     if (check_stationarity) res.constraint_violations.reserve(blocks.size() + comps.size());
     if (check_stationarity) res.stationarity_violation = sub.evalAugmentedGradientInf(z);
@@ -382,6 +532,21 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     if (n_comp > 0) {
         sub.evalGH(z, G, H);
         res.complementarity_violation = (G.cwiseProduct(H)).lpNorm<Eigen::Infinity>();
+        res.comp_neg_G = infNorm(G.cwiseMin(0.0));
+        res.comp_neg_H = infNorm(H.cwiseMin(0.0));
+        int comp_off = 0;
+        for (const CompBlock& comp : comps) {
+            if (comp.dim <= 0) continue;
+            const Eigen::VectorXd Gb = G.segment(comp_off, comp.dim);
+            const Eigen::VectorXd Hb = H.segment(comp_off, comp.dim);
+            res.comp_support_G = std::max(
+                res.comp_support_G,
+                infNorm(Gb.cwiseMax(0.0).cwiseMin(comp.kappaG.cwiseAbs())));
+            res.comp_support_H = std::max(
+                res.comp_support_H,
+                infNorm(Hb.cwiseMax(0.0).cwiseMin(comp.kappaH.cwiseAbs())));
+            comp_off += comp.dim;
+        }
     }
     auto unscale = [](double v, double scale) { return scale > 0.0 ? v / scale : v; };
     for (const DualBlock& b : blocks) {
@@ -410,7 +575,9 @@ BCDAULAResult BCDAULASolver::solve(AulaSubproblem& sub, const BCDAULAConfig& con
     }
 
     res.solve_time =
-        std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - t_start).count();
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+    res.eval_time = gn_.evalSeconds();
+    res.factor_time = gn_.factorSeconds();
     if (converged) {
         res.status = BCDAULAStatus::Converged;
         res.status_message = "Converged";

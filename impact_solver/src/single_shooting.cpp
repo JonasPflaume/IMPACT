@@ -13,7 +13,7 @@ using casadi::SX;
 // Single shooting optimizes only the controls. The state is rolled out from x_0
 // with step(), then cost and constraints are stacked over the horizon and passed
 // to buildMPCC().
-SingleShootingLayout buildSingleShooting(const StageProblem& stage, const BCDAULAConfig& config) {
+SingleShootingLayout buildSingleShooting(const StageProblem& stage, const AulaConfig& config) {
     const int horizon = config.horizon;
     const int nx = stage.stateDim();
     const int nu = stage.controlDim();
@@ -86,7 +86,7 @@ SingleShootingLayout buildSingleShooting(const StageProblem& stage, const BCDAUL
 
 // Front-end wrapper.
 
-void SingleShootingSolver::ensureBuilt(const BCDAULAConfig& config) {
+void SingleShootingSolver::ensureBuilt(const AulaConfig& config) {
     if (horizon_built_ == config.horizon) return;
     n_qpos_ = problem_->getConfigDim();
     n_qvel_ = problem_->getVelocityDim();
@@ -99,7 +99,7 @@ void SingleShootingSolver::ensureBuilt(const BCDAULAConfig& config) {
     horizon_built_ = config.horizon;
 }
 
-SingleShootingSolution SingleShootingSolver::solve(const BCDAULAConfig& config,
+SingleShootingSolution SingleShootingSolver::solve(const AulaConfig& config,
                                                    const Eigen::VectorXd& q0,
                                                    const Eigen::VectorXd& phi_vec,
                                                    const Eigen::MatrixXd& jac_mat,
@@ -114,7 +114,7 @@ SingleShootingSolution SingleShootingSolver::solve(const BCDAULAConfig& config,
 }
 
 SingleShootingSolution SingleShootingSolver::solveWithInitialGuess(
-    const BCDAULAConfig& config, const Eigen::VectorXd& q0, const Eigen::VectorXd& phi_vec,
+    const AulaConfig& config, const Eigen::VectorXd& q0, const Eigen::VectorXd& phi_vec,
     const Eigen::MatrixXd& jac_mat, const Eigen::Vector3d& target_p,
     const Eigen::Vector4d& target_q, const Eigen::MatrixXd& cmd_init,
     const Eigen::MatrixXd& lam_init, const Eigen::MatrixXd& vel_init) {
@@ -157,7 +157,7 @@ SingleShootingSolution SingleShootingSolver::solveWithInitialGuess(
         z.segment(o + n_cmd_ + n_lam_, n_qvel_) = vel_init.col(k);
     }
 
-    BCDAULAResult r = solver_.solve(sub, config, z);
+    AulaResult r = solver_.solve(sub, config, z);
 
     // Extract trajectories from the raw decision vector.
     SingleShootingSolution sol;
@@ -179,10 +179,18 @@ SingleShootingSolution SingleShootingSolver::solveWithInitialGuess(
 
     sol.objective_value = r.objective_value;
     sol.dynamics_violation = r.dynamics_violation;
+    sol.equality_violation = r.equality_violation;
+    sol.inequality_violation = r.inequality_violation;
     sol.complementarity_violation = r.complementarity_violation;
+    sol.stationarity_violation = r.stationarity_violation;
+    sol.comp_neg_G = r.comp_neg_G;
+    sol.comp_neg_H = r.comp_neg_H;
+    sol.comp_support_G = r.comp_support_G;
+    sol.comp_support_H = r.comp_support_H;
     sol.converged = r.converged;
     sol.outer_iterations = r.outer_iterations;
     sol.total_inner_iterations = r.total_inner_iterations;
+    sol.total_gn_iterations = r.total_gn_iterations;
     sol.solve_time = r.solve_time;
     sol.status_message = r.status_message;
     return sol;

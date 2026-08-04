@@ -5,7 +5,7 @@ add_executable(box_penalty_ipopt
 )
 
 target_include_directories(box_penalty_ipopt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(box_penalty_ipopt PRIVATE penalty_solver impact casadi)
+target_link_libraries(box_penalty_ipopt PRIVATE penalty_solver impact ${IMPACT_CASADI_TARGET})
 
 # Scholtes Relaxation solver executable
 add_executable(box_relaxation
@@ -14,7 +14,7 @@ add_executable(box_relaxation
 )
 
 target_include_directories(box_relaxation PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(box_relaxation PRIVATE relaxation_solver impact casadi)
+target_link_libraries(box_relaxation PRIVATE relaxation_solver impact ${IMPACT_CASADI_TARGET})
 
 # IMPACT solver — multiple shooting (state free, dynamics as defect)
 add_executable(box_impact_multiple
@@ -22,8 +22,9 @@ add_executable(box_impact_multiple
     box_pushing.cpp
 )
 
-target_include_directories(box_impact_multiple PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(box_impact_multiple PRIVATE impact casadi)
+# ../impact_cli.h carries the A/B flags shared by the IMPACT drivers.
+target_include_directories(box_impact_multiple PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(box_impact_multiple PRIVATE impact ${IMPACT_CASADI_TARGET})
 
 # IMPACT solver — single shooting (state rolled out from x_0)
 add_executable(box_impact_single
@@ -31,5 +32,5 @@ add_executable(box_impact_single
     box_pushing.cpp
 )
 
-target_include_directories(box_impact_single PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(box_impact_single PRIVATE impact casadi)
+target_include_directories(box_impact_single PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(box_impact_single PRIVATE impact ${IMPACT_CASADI_TARGET})

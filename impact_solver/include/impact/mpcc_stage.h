@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include "impact/bcd_aula_config.h"
+#include "impact/aula_config.h"
 #include "impact/problem.h"
 #include "impact/stage_problem.h"
 
@@ -23,7 +23,7 @@ namespace impact {
  */
 class MPCCStage : public StageProblem {
    public:
-    MPCCStage(std::shared_ptr<MPCCProblem> problem, const BCDAULAConfig& config);
+    MPCCStage(std::shared_ptr<MPCCProblem> problem, const AulaConfig& config);
 
     int stateDim() const override { return nx_; }
     int controlDim() const override { return nu_; }

@@ -6,7 +6,7 @@ namespace impact {
 
 using casadi::SX;
 
-MPCCStage::MPCCStage(std::shared_ptr<MPCCProblem> problem, const BCDAULAConfig& config)
+MPCCStage::MPCCStage(std::shared_ptr<MPCCProblem> problem, const AulaConfig& config)
     : problem_(std::move(problem)) {
     nx_ = problem_->getStateDim();
     nu_ = problem_->getControlDim();

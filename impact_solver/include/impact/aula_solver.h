@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "impact/aula_subproblem.h"
-#include "impact/bcd_aula_config.h"
+#include "impact/aula_config.h"
 #include "impact/gauss_newton_solver.h"
 
 namespace impact {
@@ -26,12 +26,12 @@ struct ConstraintViolation {
 };
 
 /**
- * @brief Result returned by BCDAULASolver.
+ * @brief Result returned by AulaSolver.
  *
  * `z` is the raw decision vector. Shooting front-ends reshape it into task
  * trajectories. Reported constraint violations are unscaled.
  */
-struct BCDAULAResult {
+struct AulaResult {
     Eigen::VectorXd z;
 
     double objective_value = 0.0;
@@ -42,11 +42,31 @@ struct BCDAULAResult {
     double stationarity_violation = 0.0;      // ||grad_z L_A||_inf; 0 when not evaluated
     std::vector<ConstraintViolation> constraint_violations;
 
+    // Tolerance-free MPCC complementarity certificate at the final (z, kappa).
+    // Classifying index sets needs an active-set threshold, and at tight tolerances
+    // ||min(G,0)|| is itself the size of any sane threshold, so the threshold would
+    // decide the verdict. These four numbers need none: a W-stationary point drives
+    // all of them to zero. Multiplier scale factors are irrelevant to "is it zero",
+    // so the raw split multipliers are used.
+    double comp_neg_G = 0.0;      // ||min(G, 0)||_inf
+    double comp_neg_H = 0.0;      // ||min(H, 0)||_inf
+    double comp_support_G = 0.0;  // ||min(max(G, 0), |kappaG|)||_inf
+    double comp_support_H = 0.0;  // ||min(max(H, 0), |kappaH|)||_inf
+
     bool converged = false;  // == (status == BCDAULAStatus::Converged)
     BCDAULAStatus status = BCDAULAStatus::MaxIterations;
     int outer_iterations = 0;
     int total_inner_iterations = 0;
+    int total_gn_iterations = 0;  // accepted Gauss-Newton steps over all inner sweeps
+
     double solve_time = 0.0;
+    // Where the solve time went, so "would a faster linear-algebra backend help?"
+    // is a measurement rather than an assumption. eval_time is the CasADi
+    // residual/Jacobian evaluations; factor_time is the sparse LDL^T
+    // factorizations and triangular solves. The remainder is assembly, the
+    // complementarity projection, and the outer loop's own bookkeeping.
+    double eval_time = 0.0;
+    double factor_time = 0.0;
     std::string status_message;
 };
 
@@ -68,9 +88,9 @@ struct BCDAULAResult {
  * The shooting builders decide which dual blocks exist; this loop only updates
  * the blocks it is given.
  */
-class BCDAULASolver {
+class AulaSolver {
    public:
-    BCDAULASolver() = default;
+    AulaSolver() = default;
 
     /**
      * @brief Solve the subproblem in place starting from z_init.
@@ -78,7 +98,7 @@ class BCDAULASolver {
      * @param config   Solver hyper-parameters
      * @param z_init   Initial decision vector (size sub.numOpt())
      */
-    BCDAULAResult solve(AulaSubproblem& sub, const BCDAULAConfig& config,
+    AulaResult solve(AulaSubproblem& sub, const AulaConfig& config,
                         const Eigen::VectorXd& z_init);
 
    private:

@@ -1,6 +1,11 @@
 # ---- Build ----
 build/
 build-*/
+build_py/
+# scikit-build-core writes wheels under build/{wheel_tag}
+*.egg-info/
+dist/
+wheelhouse/
 cmake-build-*/
 # In case CMake is ever run in-source
 CMakeCache.txt
