@@ -21,6 +21,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+// The only CasADi headers here, and neither declares a type: `config.h` for the
+// version this module is compiled against, `casadi_meta.hpp` for the version of
+// the libcasadi it ends up linked to. Both are strings the import guard reads.
+#include <casadi/config.h>
+#include <casadi/core/casadi_meta.hpp>
+
 #include <memory>
 #include <string>
 #include <utility>
@@ -307,4 +313,16 @@ PYBIND11_MODULE(_impact_core, m) {
 #else
     m.attr("__version__") = "0.0.0";
 #endif
+
+    // Which CasADi this extension is really talking to. The two are not the same
+    // question: `casadi_build_version` is the header it was compiled against,
+    // baked in at build time, while `casadi_runtime_version` is answered by the
+    // libcasadi the dynamic loader actually bound it to -- which is whichever
+    // copy reached the process first, because every CasADi 3.x exports the same
+    // SONAME. Python compares both against the `casadi` module it imported (see
+    // the preamble in impact/__init__.py): the problem crosses this boundary as
+    // CasADi's own serialized functions, so a disagreement here is a solve that
+    // dies inside `Function::deserialize` -- or worse, does not.
+    m.attr("casadi_build_version") = CASADI_VERSION_STRING;
+    m.attr("casadi_runtime_version") = casadi::CasadiMeta::version();
 }

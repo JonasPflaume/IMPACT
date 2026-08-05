@@ -57,6 +57,7 @@ Two packages live under `python/`, and the split is the point:
 | `examples` | this repository's task models, tuned settings, drivers and visualizers | no — repository material |
 
 ```python
+import impact                    # before casadi, if you have more than one CasADi
 import numpy as np
 import casadi as ca
 from impact import AulaConfig, BlockOptions, MPCCDescription, Solver, build_mpcc
@@ -128,6 +129,17 @@ offsets it chose. Nothing symbolic is built in C++, and no CasADi type appears i
 the binding signatures. The extension links the `libcasadi` that ships inside the
 `casadi` wheel, so both sides of that boundary are the same library build by
 construction rather than by version negotiation.
+
+That construction has one thing it needs from you: import `impact` before CasADi
+if the machine has more than one CasADi installed — a `pip install --user` of a
+different release, an `/opt` tree on `PYTHONPATH`, a conda package that brings
+its own. Every CasADi 3.x exports the same SONAME (`libcasadi.so.3.7`, the 3.6
+releases included), so the dynamic loader binds the extension to whichever copy
+reached the process first and never consults the RPATH; importing the solver
+first is what makes that copy the right one. When the two disagree anyway,
+`import impact` fails there and then, naming both versions and the libcasadi it
+was actually given, instead of surfacing much later as a serialized function the
+solver cannot read.
 
 `python/tests/test_parity.py` pins the port: for every task, both shooting
 transcriptions and both inner solvers, the Python-built residual and Jacobian are
