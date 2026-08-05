@@ -158,7 +158,7 @@ torus, water_bottle}. Other flags: `--seed <n>`, `--save-video <path>` (with
 State and control variables can have different physical units and numerical
 scales, which may affect convergence speed and require problem-specific tuning.
 We are working on making the solver less sensitive to these parameters. If you
-have experience with this issue, please feel free to contact me directly.
+have experience with this issue, please feel free to contact Jiayun directly.
 
 ## Solve an MPCC
 
