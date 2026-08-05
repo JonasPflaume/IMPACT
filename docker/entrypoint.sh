@@ -5,6 +5,32 @@ set -euo pipefail
 
 cd /workspace/impact
 
+# Anything the container writes into a bind-mounted results/ would otherwise be
+# root-owned on the host: the image builds and runs as root (see the Dockerfile
+# for why it cannot simply drop to a build-time user). Rather than requiring
+# `--user "$(id -u):$(id -g)"` on every invocation, take the ownership of the
+# results mount point -- the directory the host user created -- as the intent,
+# and hand everything written underneath it back to that owner on the way out.
+RESULTS_DIR=/workspace/impact/results
+
+restore_results_ownership() {
+    local owner
+    # Started with --user: the writes already landed with the right owner.
+    if [ "$(id -u)" != 0 ]; then
+        return 0
+    fi
+    if [ ! -d "$RESULTS_DIR" ]; then
+        return 0
+    fi
+    owner=$(stat -c '%u:%g' "$RESULTS_DIR" 2>/dev/null) || return 0
+    # Root-owned mount point: nothing to infer, leave it alone.
+    if [ "$owner" = "0:0" ]; then
+        return 0
+    fi
+    chown -R "$owner" "$RESULTS_DIR" 2>/dev/null || true
+}
+trap restore_results_ownership EXIT
+
 usage() {
     cat <<'EOF'
 IMPACT Docker commands:
@@ -49,11 +75,13 @@ case "$cmd" in
     run)
         micromamba run -n base python -m examples.run "$@"
         ;;
+    # Not `exec`: replacing this shell would discard the EXIT trap above, and an
+    # interactive session is exactly where results get written by hand.
     python)
-        exec micromamba run -n base python "$@"
+        micromamba run -n base python "$@"
         ;;
     bash|shell)
-        exec /bin/bash "$@"
+        /bin/bash "$@"
         ;;
     help|--help|-h)
         usage

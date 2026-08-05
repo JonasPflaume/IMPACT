@@ -3,8 +3,9 @@ FROM mambaorg/micromamba:1.5.10-jammy
 # Build and run as root throughout. The base image defaults to a non-root
 # user, but the legacy (non-BuildKit) builder creates WORKDIR/COPY content
 # owned by root, which makes the build directory unwritable for that user.
-# Staying root works on every Docker setup; the only cost is that files
-# written to bind-mounted volumes are root-owned on Linux hosts.
+# Staying root works on every Docker setup. It used to cost bind-mounted
+# results/ files being root-owned on Linux hosts; the entry point now restores
+# them to the owner of the mount point on exit, so `--user` is not needed.
 USER root
 
 RUN apt-get update \

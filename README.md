@@ -3,7 +3,8 @@
 IMPACT is an augmented-Lagrangian / block-coordinate-descent solver for
 **MPCCs** (Mathematical Programs with Complementarity Constraints). The code in
 this repository is mainly organized around contact-implicit trajectory
-optimization, but the solver can also be used on a generic MPCC.
+optimization, but the solver can also be used on an MPCC with a sum-of-squares
+objective.
 
 <p align="center">
   <a href="https://jonaspflaume.github.io/impact_info/">
@@ -152,6 +153,7 @@ Python bindings, solves Push-T, and renders the trajectory it found:
 docker build -t impact .
 
 # Solve Push-T and render the result into ./results/push_t/
+mkdir -p results
 docker run --rm -v "$PWD/results:/workspace/impact/results" impact
 
 # Any other task, same image
@@ -163,9 +165,11 @@ The image builds only the Python extension — no C++ driver executables, no
 MuJoCo, no GLFW — so it stays small and works on x86_64 and arm64 alike. Run
 `docker run --rm impact help` to see all wrapper commands.
 
-The container runs as root, so files written to the mounted `results/` directory
-are root-owned on Linux hosts; add `--user "$(id -u):$(id -g)"` to the
-`docker run` command if you want them owned by your user.
+Whatever the container writes into the mounted `results/` directory comes back
+owned by you rather than by root: the entry point reads the owner of the mount
+point and applies it to everything underneath on the way out. Creating
+`results/` before the run is what gives it an owner to read — a path Docker has
+to create itself is made root-owned on the host.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -278,38 +282,6 @@ and requires MuJoCo + GLFW:
 flashlight, foambrick, light_bulb, mug, piggy_bank, rubber_duck, stick, teapot,
 torus, water_bottle}. Other flags: `--seed <n>`, `--save-video <path>` (with
 `--render`), `--horizon <h>`, `--max-inner-iters <n>`, `--no-saddle`.
-
-## Where the solve time goes
-
-`AulaResult` reports `eval_time` (CasADi residual/Jacobian evaluations)
-and `factor_time` (sparse LDLᵀ factorizations and triangular solves) alongside
-`solve_time`, so the question "would a faster linear-algebra backend help?" is a
-measurement rather than a guess. Measured on this machine:
-
-| task | n_opt | solve | eval | factor | other |
-|---|---|---|---|---|---|
-| push_circle H100 | 804 | 40 ms | 47% | 37% | 15% |
-| box H50 | 453 | 25 ms | 48% | 28% | 24% |
-| push_t H50 | 1353 | 352 ms | 43% | 38% | 19% |
-| cart H300 | 2404 | 14 ms | 40% | 14% | 46% |
-| allegro H4 (single) | 472 | 6.7 ms | 36% | 22% | 42% |
-
-The two are co-dominant, with evaluation consistently the larger. Two consequences:
-
-* **A faster factorization is capped at 14–38%.** Doubling its speed buys 7–19%
-  overall. Eigen's `SimplicialLDLT` already uses AMD, and there is no free win in
-  the ordering — in its natural ordering the saddle matrix is essentially
-  full-bandwidth (2006 of 2010 for push_circle), so the reordering is doing real
-  work. Beating it needs a better *kernel* (CHOLMOD, MKL PARDISO, MUMPS), i.e. a
-  new system dependency, for a bounded return.
-* **Compiling the CasADi functions buys the evaluation half, and only that.**
-  With `config.jit = True` the results stay bit-identical and evaluation gets
-  1.3–1.4× faster (push_circle 18.3 → 13.2 ms, push_t 154 → 120 ms, medians of 5),
-  which is a 1.15× win on total solve time — because factorization, the other half,
-  is untouched. It is paid for in build time, and `-O1` / `-O2 -march=native` change
-  nothing versus `-O0` while costing seconds more of it: SX codegen emits one huge
-  flat C function that gcc's optimizer scales badly on. Worth enabling for repeated
-  solves on one problem, not for a single solve. Off by default.
 
 ## Numerical scaling
 
