@@ -188,24 +188,27 @@ try:
     from . import _impact_core
 except ImportError as _exc:  # pragma: no cover - environment-dependent
     # The overwhelmingly likely cause is the SONAME collision described above: a
-    # foreign CasADi got imported first and the loader bound our DT_NEEDED to its
-    # libcasadi, which is a different release exporting the same SONAME, so a
-    # symbol we reference is simply not in it. The bare message is a mangled name,
-    # so attach the diagnosis and the things that actually fix it.
+    # foreign CasADi got imported first, the loader satisfied our DT_NEEDED from
+    # its libcasadi, and a symbol we reference is not in that one. The bare
+    # message is a mangled name, so attach the diagnosis, and the file itself --
+    # the two things it can be, a different release and a different std::string
+    # ABI, are told apart by which libcasadi is listed, not by anything here.
     if _impact_casadi_first and _impact_casadi_dir != _impact_sibling_casadi:
         _impact_wanted = _casadi_version_at(_impact_sibling_casadi)
         raise ImportError(
             f"{_exc}\n\n"
             f"CasADi {_impact_casadi_version} was imported from {_impact_casadi_dir} "
-            "before impact was, so the dynamic loader bound the solver extension to "
-            "that copy's libcasadi: every CasADi 3.x ships one SONAME "
-            "(libcasadi.so.3.7, the 3.6 releases included), whichever copy is already "
-            "in the process wins, and impact's own RPATH is never consulted. The "
-            "symbol error above is what a different CasADi release looks like from "
-            "the inside.\n\n"
-            + (f"impact needs the CasADi installed beside it at "
-               f"{_impact_sibling_casadi} ({_impact_wanted}).\n\n" if _impact_wanted else "")
-            + _IMPACT_REMEDY
+            "before impact was, so the solver extension got its libcasadi from what "
+            "was already in the process rather than from its own RPATH, which the "
+            "loader never consults once the SONAME is taken -- and every CasADi 3.x "
+            "takes the same one (libcasadi.so.3.7, the 3.6 releases included). The "
+            "symbol error above is what a foreign libcasadi looks like from the "
+            "inside: another release, or the same release built against the other "
+            "std::string ABI.\n\n"
+            f"  libcasadi in this process : {', '.join(_loaded_libcasadi()) or 'unknown'}\n"
+            + (f"  impact was built for      : CasADi {_impact_wanted}, installed "
+               f"beside it at {_impact_sibling_casadi}\n" if _impact_wanted else "")
+            + f"\n{_IMPACT_REMEDY}"
         ) from _exc
     raise
 
